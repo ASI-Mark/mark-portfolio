@@ -178,8 +178,10 @@ export function avatarReducer(
 function getDockPosition(): { x: number; y: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  // posX anchors the canvas center, so leave half a canvas width of margin
+  // or the model clips off the right viewport edge
   const roomRight = vw / 2 - 360; // px of space to the right of the 720px column
-  const x = roomRight > 100 ? vw - 70 : vw - 40;
+  const x = roomRight > 100 ? vw - 130 : vw - 90;
   const y = vh - 90;
   return { x, y };
 }
