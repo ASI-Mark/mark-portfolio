@@ -27,7 +27,7 @@
 ## Phase 0 · 止血（今天）
 
 - [x] 0.1 移除摄像头手势：ChinaMap.tsx 的 camera 模式分支、MapGesturePrompt.tsx、useHandTracking.ts、`@mediapipe/tasks-vision` 依赖，全部删除；鼠标模式保持原样
-- [ ] 0.2 删死代码：ChinaGlobeMap.tsx、ChinaParticleMap.tsx、ScrollArrow.tsx、AnimatedNumber.tsx、`react-globe.gl` 依赖、public/globe/
+- [x] 0.2 删死代码：ChinaGlobeMap.tsx、ChinaParticleMap.tsx、ScrollArrow.tsx、AnimatedNumber.tsx、`react-globe.gl` 依赖、public/globe/
 - [ ] 0.3 清 public/ 孤儿资源（**删前逐个 grep 确认零引用**）：avatar.png、photo.jpg、wechat-qr.jpg、avatar-nobg-small.png、next.svg / vercel.svg / globe.svg / window.svg / file.svg
 - [ ] 0.4 修导航死链：作品区 DOM id 统一为 `works`（page.tsx / Experience.tsx / Nav.tsx / useAvatarState.ts 四处口径一致）
 - [ ] 0.5 太空人行为修正：睡眠/躺平只允许发生在 720px 版心之外或屏幕角落（进入睡眠先移动到停靠位）；滚动或鼠标移动立即唤醒；遮挡正文时降透明度
