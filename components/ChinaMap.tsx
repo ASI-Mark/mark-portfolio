@@ -4,8 +4,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
 import cities from "@/content/cities.json";
 import { CHINA_PROVINCES } from "@/lib/china-map-data";
-import MapGesturePrompt from "./MapGesturePrompt";
-import { useHandTracking } from "./useHandTracking";
 
 interface City {
   name: string;
@@ -79,15 +77,10 @@ export default function ChinaMap() {
   const [selected, setSelected] = useState<City | null>(null);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [hoveredCity, setHoveredCity] = useState<string | null>(null);
-  const [lockedCity, setLockedCity] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [gestureMode, setGestureMode] = useState<"none" | "camera" | "mouse">("none");
   const [burstId, setBurstId] = useState(0);
 
   const mapRef = useRef<HTMLDivElement>(null);
-
-  const { hand, status: handStatus, error: handError, videoRef } =
-    useHandTracking(gestureMode === "camera");
 
   const selectCity = useCallback((city: City) => {
     setSelected(city);
@@ -123,8 +116,7 @@ export default function ChinaMap() {
   }, [hoveredCity]);
 
   // Preload the first photo of each city so the gallery opens instantly
-  // when the user makes a fist — eliminates the "nothing happens for a while"
-  // feeling Mark reported in camera mode.
+  // when the user clicks a city dot.
   useEffect(() => {
     if (!mounted) return;
     typedCities.forEach((c) => {
@@ -132,48 +124,6 @@ export default function ChinaMap() {
       img.src = `/cities/${c.name}_1.jpg`;
     });
   }, [mounted, typedCities]);
-
-  // Hand tracking → hovered city + fist gallery control
-  useEffect(() => {
-    if (gestureMode !== "camera") return;
-    if (!hand) return;
-
-    // Map normalized hand.x/y (0..1) into SVG viewBox coordinate space,
-    // then pick the nearest city by projected SVG coords.
-    const targetX = VIEW_X + hand.x * VIEW_W;
-    const targetY = VIEW_Y + hand.y * VIEW_H;
-
-    let nearest: (typeof cityPositions)[number] | null = null;
-    let nearestDist = Infinity;
-    for (const c of cityPositions) {
-      const dx = c.pos.x - targetX;
-      const dy = c.pos.y - targetY;
-      const d = dx * dx + dy * dy;
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearest = c;
-      }
-    }
-    if (nearest && nearest.name !== hoveredCity) {
-      setHoveredCity(nearest.name);
-    }
-
-    // Three-step gesture flow:
-    //   1. Hand hovers over a city → hoveredCity tracks it
-    //   2. OK gesture (thumb+index pinch) while hovering → LOCK that city
-    //   3. Fist while something is locked → open gallery for LOCKED city
-    //   4. Open hand → close gallery + unlock
-    if (hand.isOk && nearest && !lockedCity) {
-      setLockedCity(nearest.name);
-    } else if (hand.isFist && lockedCity && !selected) {
-      const lockedObj = cityPositions.find((c) => c.name === lockedCity);
-      if (lockedObj) selectCity(lockedObj);
-    } else if (!hand.isFist && !hand.isOk && selected) {
-      setSelected(null);
-      setLockedCity(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hand, gestureMode, lockedCity]);
 
   return (
     <>
@@ -203,102 +153,10 @@ export default function ChinaMap() {
                 "radial-gradient(ellipse at 50% 30%, #1a2330 0%, #0d1117 60%, #05070b 100%)",
               boxShadow:
                 "0 40px 80px rgba(0,0,0,0.6), 0 0 100px rgba(64,128,200,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
-              // Stronger 3D tilt + dynamic hand response for holographic feel
-              transform:
-                gestureMode === "camera" && hand
-                  ? `rotateX(${18 - hand.y * 28}deg) rotateY(${(hand.x - 0.5) * 22}deg) scale(${hand.isFist ? 1.02 : 1})`
-                  : "rotateX(14deg)",
+              transform: "rotateX(14deg)",
               transformStyle: "preserve-3d",
             }}
           >
-            {/* Scan line overlay — slow horizontal sweep for holographic vibe */}
-            {gestureMode === "camera" && (
-              <div
-                className="absolute inset-0 pointer-events-none"
-                style={{
-                  background:
-                    "linear-gradient(transparent 0%, rgba(100,180,255,0.06) 49%, rgba(100,180,255,0.12) 50%, rgba(100,180,255,0.06) 51%, transparent 100%)",
-                  backgroundSize: "100% 200%",
-                  animation: "mapScan 4s linear infinite",
-                  zIndex: 2,
-                  mixBlendMode: "screen",
-                }}
-              />
-            )}
-            {/* Gesture opt-in prompt */}
-            {mounted && gestureMode === "none" && (
-              <MapGesturePrompt
-                onAllow={() => setGestureMode("camera")}
-                onDeny={() => setGestureMode("mouse")}
-              />
-            )}
-
-            {/* Camera mode: video preview + hand position overlay + status */}
-            {gestureMode === "camera" && (
-              <div className="absolute top-4 left-4 z-10 w-56">
-                <div className="aspect-video border border-line rounded-sm overflow-hidden bg-black relative">
-                  <video
-                    ref={videoRef}
-                    className="w-full h-full object-cover"
-                    style={{ transform: "scaleX(-1)" }}
-                    muted
-                    playsInline
-                  />
-                  {hand && (
-                    <div
-                      className={`absolute w-8 h-8 rounded-full pointer-events-none border-2 transition-colors ${
-                        hand.isFist
-                          ? "bg-accent/40 border-accent"
-                          : "border-accent"
-                      }`}
-                      style={{
-                        left: `${hand.x * 100}%`,
-                        top: `${hand.y * 100}%`,
-                        transform: "translate(-50%, -50%)",
-                      }}
-                    />
-                  )}
-                  {/* Loading / status overlay */}
-                  {handStatus !== "running" && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-white text-xs font-sans tracking-wide text-center px-3">
-                      {handStatus === "loading-wasm" && "加载识别引擎…"}
-                      {handStatus === "loading-model" && "加载手势模型…"}
-                      {handStatus === "awaiting-camera" && "等待摄像头…"}
-                      {handStatus === "error" && (
-                        <div>
-                          <p className="mb-2 text-red-300">无法启动摄像头</p>
-                          <p className="text-[10px] text-white/60 break-all">
-                            {handError}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* Status line + exit camera mode */}
-                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-sans tracking-widest">
-                  <span className="text-muted uppercase">
-                    {handStatus === "running"
-                      ? hand
-                        ? hand.isFist
-                          ? "握拳"
-                          : "跟踪中"
-                        : "举手入镜"
-                      : handStatus === "error"
-                      ? "失败"
-                      : "初始化…"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setGestureMode("mouse")}
-                    className="text-muted hover:text-ink transition-colors uppercase"
-                  >
-                    切回鼠标 →
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Vignette overlay */}
             <div
               className="absolute inset-0 pointer-events-none"
@@ -307,105 +165,6 @@ export default function ChinaMap() {
                 zIndex: 1,
               }}
             />
-
-            {/* Camera mode: hand cursor on the map + instruction text */}
-            {gestureMode === "camera" && handStatus === "running" && hand && (
-              <>
-                {/* Glowing cursor following the hand */}
-                <div
-                  className="absolute pointer-events-none transition-all duration-75"
-                  style={{
-                    left: `${hand.x * 100}%`,
-                    top: `${hand.y * 100}%`,
-                    width: hand.isFist ? 90 : hand.isOk ? 70 : 56,
-                    height: hand.isFist ? 90 : hand.isOk ? 70 : 56,
-                    transform: "translate(-50%, -50%)",
-                    background: hand.isFist
-                      ? "radial-gradient(circle, rgba(255,180,100,0.75) 0%, rgba(255,180,100,0.1) 50%, transparent 70%)"
-                      : hand.isOk
-                      ? "radial-gradient(circle, rgba(120,255,180,0.6) 0%, rgba(120,255,180,0.1) 55%, transparent 75%)"
-                      : "radial-gradient(circle, rgba(255,230,180,0.5) 0%, rgba(255,230,180,0.1) 60%, transparent 80%)",
-                    zIndex: 4,
-                    mixBlendMode: "screen",
-                  }}
-                />
-                {/* Pulsing inner dot */}
-                <div
-                  className="absolute pointer-events-none"
-                  style={{
-                    left: `${hand.x * 100}%`,
-                    top: `${hand.y * 100}%`,
-                    width: 8,
-                    height: 8,
-                    transform: "translate(-50%, -50%)",
-                    borderRadius: "50%",
-                    background: hand.isFist
-                      ? "#ffb464"
-                      : hand.isOk
-                      ? "#78ffb4"
-                      : "#ffe6b4",
-                    boxShadow: hand.isFist
-                      ? "0 0 12px rgba(255,180,100,0.9)"
-                      : hand.isOk
-                      ? "0 0 12px rgba(120,255,180,0.9)"
-                      : "0 0 8px rgba(255,230,180,0.7)",
-                    zIndex: 5,
-                  }}
-                />
-              </>
-            )}
-
-            {/* Locked city marker — pulsing ring around the selected city */}
-            {gestureMode === "camera" &&
-              handStatus === "running" &&
-              lockedCity &&
-              (() => {
-                const city = cityPositions.find((c) => c.name === lockedCity);
-                if (!city) return null;
-                const leftPct = ((city.pos.x - VIEW_X) / VIEW_W) * 100;
-                const topPct = ((city.pos.y - VIEW_Y) / VIEW_H) * 100;
-                return (
-                  <div
-                    className="absolute pointer-events-none"
-                    style={{
-                      left: `${leftPct}%`,
-                      top: `${topPct}%`,
-                      width: 60,
-                      height: 60,
-                      transform: "translate(-50%, -50%)",
-                      borderRadius: "50%",
-                      border: "2px solid rgba(120,255,180,0.8)",
-                      boxShadow:
-                        "0 0 20px rgba(120,255,180,0.5), inset 0 0 12px rgba(120,255,180,0.3)",
-                      animation: "flashlightPulse 1.4s ease-in-out infinite",
-                      zIndex: 4,
-                    }}
-                  />
-                );
-              })()}
-
-            {/* Camera mode instruction bar at bottom */}
-            {gestureMode === "camera" && handStatus === "running" && (
-              <div
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[6] px-4 py-2 rounded-full font-sans text-xs tracking-wide pointer-events-none"
-                style={{
-                  background: "rgba(0,0,0,0.7)",
-                  backdropFilter: "blur(6px)",
-                  color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                }}
-              >
-                {!hand
-                  ? "举起手掌，对准摄像头"
-                  : selected
-                  ? "松开手掌关闭"
-                  : lockedCity
-                  ? `握拳查看「${lockedCity}」的照片`
-                  : hoveredCity
-                  ? `👌 OK 手势确认「${hoveredCity}」`
-                  : "移动手掌，对准一个城市"}
-              </div>
-            )}
 
             {/* Main SVG: provinces + labels + dots + effects */}
             <svg
@@ -542,12 +301,8 @@ export default function ChinaMap() {
                       filter={isBeijing ? "url(#beijing-glow)" : "url(#dot-glow)"}
                       className="transition-all duration-300 cursor-pointer"
                       onClick={() => selectCity(city)}
-                      onMouseEnter={() => {
-                        if (gestureMode !== "camera") setHoveredCity(city.name);
-                      }}
-                      onMouseLeave={() => {
-                        if (gestureMode !== "camera") setHoveredCity(null);
-                      }}
+                      onMouseEnter={() => setHoveredCity(city.name)}
+                      onMouseLeave={() => setHoveredCity(null)}
                       style={{ cursor: "pointer" }}
                     />
 

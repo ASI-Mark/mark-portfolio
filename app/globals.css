@@ -105,7 +105,3 @@ html, body {
   100% { opacity: 0; transform: scale(1.8); }
 }
 
-@keyframes mapScan {
-  0% { background-position: 0% -100%; }
-  100% { background-position: 0% 200%; }
-}
