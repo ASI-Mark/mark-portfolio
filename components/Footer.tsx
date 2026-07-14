@@ -16,7 +16,7 @@ export default function Footer() {
           <span>{content.footer.contact.email}</span>
         </div>
         <div className="font-sans text-[10px] text-muted tracking-widest">
-          马泽闰 · 2026 · 最后更新 {new Date().toISOString().slice(0, 10)}
+          马泽闰 · 2026 · 构建于 {new Date().toISOString().slice(0, 10)}
         </div>
       </div>
     </footer>
