@@ -140,4 +140,23 @@ describe("avatarReducer", () => {
     state = avatarReducer(state, { type: "MOUSE_MOVE", x: 200, y: 200 });
     expect(state.animation).toBe("walk");
   });
+
+  // DOCK is dispatched by the hook before it lets the avatar fall asleep, so
+  // it never naps on top of the reading column — see dockThenSleep in
+  // useAvatarState.ts. Mechanically it's the same shape as MOUSE_MOVE.
+  it("DOCK walks the avatar toward the given coordinates", () => {
+    let state = initialState();
+    state.animation = "sit";
+    state = avatarReducer(state, { type: "DOCK", x: 900, y: 600 });
+    expect(state.animation).toBe("walk");
+    expect(state.targetX).toBe(900);
+    expect(state.targetY).toBe(600);
+  });
+
+  it("DOCK computes facing direction the same way MOUSE_MOVE does", () => {
+    let state = initialState();
+    state.posX = 500;
+    state = avatarReducer(state, { type: "DOCK", x: 900, y: 600 });
+    expect(state.facingLeft).toBe(false);
+  });
 });

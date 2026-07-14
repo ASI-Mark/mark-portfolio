@@ -30,7 +30,7 @@
 - [x] 0.2 删死代码：ChinaGlobeMap.tsx、ChinaParticleMap.tsx、ScrollArrow.tsx、AnimatedNumber.tsx、`react-globe.gl` 依赖、public/globe/
 - [x] 0.3 清 public/ 孤儿资源（**删前逐个 grep 确认零引用**）：avatar.png、photo.jpg、wechat-qr.jpg、avatar-nobg-small.png、next.svg / vercel.svg / globe.svg / window.svg / file.svg —— 全部 9 个文件 grep 全代码确认零引用（含 docs/plans/ 也只是文字提及，非代码引用），全部删除，无需保留任何一个
 - [x] 0.4 修导航死链：作品区 DOM id 统一为 `works`（page.tsx / Experience.tsx / Nav.tsx / useAvatarState.ts 四处口径一致）—— Nav.tsx 和 useAvatarState.ts 本来就已经用 `works`，实际只需把 Experience.tsx 的 `id="experience"` 改成 `id="works"`；顺带发现 FloatingArrow.tsx 的 SECTIONS 数组和初始 nextSection 也硬编码了 `"experience"`（未在原计划列出但同源死链，一并修复）
-- [ ] 0.5 太空人行为修正：睡眠/躺平只允许发生在 720px 版心之外或屏幕角落（进入睡眠先移动到停靠位）；滚动或鼠标移动立即唤醒；遮挡正文时降透明度
+- [x] 0.5 太空人行为修正：睡眠/躺平只允许发生在 720px 版心之外或屏幕角落（进入睡眠先移动到停靠位）；滚动或鼠标移动立即唤醒；遮挡正文时降透明度 —— useAvatarState.ts 新增 `DOCK` action + `dockThenSleep()`（所有睡眠入口统一走这里，先走到右下角停靠位再睡，走位失败 6s 超时兜底）+ `dimmed` 返回值（水平遮挡 720px 版心时降到 0.35）+ scroll 唤醒监听；Avatar3D.tsx 新增 `isMobile`（<768px 或触屏）整体隐藏 3D 头像 + 应用 dimmed 透明度；AvatarCompanion.tsx（无 WebGL 兜底路径）做了同等的停靠/唤醒/降透明度小实现，保持两条路径行为一致。单测新增 2 条覆盖 DOCK action，60 个测试全过
 - [ ] 0.6 数字口径统一：static.json 抖音 2万→**4.7万**；worker/chat-worker.js 分身人设同步抖音 4.7 万（timeline 里「2024.8 一个月 0→2万」是当月史实，保留）
 - [ ] 0.7 移动端修复：nav 两字词禁止竖排拆行；「右键复位」文案触屏隐藏
 - [ ] 0.8 Footer「最后更新」是构建时间固化值 → 改成「构建于 {日期}」或删掉

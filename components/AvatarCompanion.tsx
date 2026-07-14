@@ -5,6 +5,17 @@ import Image from "next/image";
 
 type PetState = "idle" | "walking" | "sleeping" | "wave" | "thinking";
 
+// Same dock logic as useAvatarState's getDockPosition — walk to the corner,
+// outside the centered 720px reading column, before napping.
+function getDockPosition(): { x: number; y: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const roomRight = vw / 2 - 360;
+  const x = roomRight > 100 ? vw - 40 : vw - 24;
+  const y = vh - 90;
+  return { x, y };
+}
+
 interface AvatarCompanionProps {
   onChatOpen: () => void;
   chatOpen: boolean;
@@ -18,11 +29,64 @@ export default function AvatarCompanion({ onChatOpen, chatOpen }: AvatarCompanio
   const [frame, setFrame] = useState(0);
   const [showBubble, setShowBubble] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [dimmed, setDimmed] = useState(false);
   const idleTimer = useRef<NodeJS.Timeout | null>(null);
+  const dockTimer = useRef<NodeJS.Timeout | null>(null);
   const frameRef = useRef(0);
   const stateRef = useRef<PetState>("idle");
   const posRef = useRef({ x: 100, y: 100 });
   const targetRef = useRef({ x: 100, y: 100 });
+
+  // Walk to the dock position, then fall asleep once close enough (or after
+  // a generous timeout) — never sleep wherever the cursor last left it.
+  const dockThenSleep = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const { x, y } = getDockPosition();
+    targetRef.current = { x, y };
+    setTargetPos({ x, y });
+    stateRef.current = "walking";
+    setState("walking");
+
+    const startedAt = Date.now();
+    const poll = () => {
+      const cur = posRef.current;
+      const dx = x - cur.x;
+      const dy = y - cur.y;
+      const arrived = Math.sqrt(dx * dx + dy * dy) <= 48;
+      if (arrived || Date.now() - startedAt > 6000) {
+        stateRef.current = "sleeping";
+        setState("sleeping");
+        return;
+      }
+      dockTimer.current = setTimeout(poll, 100);
+    };
+    poll();
+  }, []);
+
+  // Shared wake-up: cancel any pending dock/sleep, come back from sleeping,
+  // and restart the idle → sleep timer chain. Used by both mouse move and
+  // scroll so the avatar never stays dozed off just because the cursor held
+  // still while the visitor scrolled.
+  const wake = useCallback(() => {
+    if (dockTimer.current) {
+      clearTimeout(dockTimer.current);
+      dockTimer.current = null;
+    }
+    if (stateRef.current === "sleeping") {
+      stateRef.current = "walking";
+      setState("walking");
+    }
+
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => {
+      stateRef.current = "idle";
+      setState("idle");
+
+      idleTimer.current = setTimeout(() => {
+        dockThenSleep();
+      }, 8000);
+    }, 2000);
+  }, [dockThenSleep]);
 
   // Initialize position
   useEffect(() => {
@@ -41,30 +105,38 @@ export default function AvatarCompanion({ onChatOpen, chatOpen }: AvatarCompanio
 
     function onMouseMove(e: MouseEvent) {
       targetRef.current = { x: e.clientX - 16, y: e.clientY - 16 };
-
-      // Wake up if sleeping
-      if (stateRef.current === "sleeping") {
-        stateRef.current = "walking";
-        setState("walking");
-      }
-
-      // Reset idle timer
-      if (idleTimer.current) clearTimeout(idleTimer.current);
-      idleTimer.current = setTimeout(() => {
-        stateRef.current = "idle";
-        setState("idle");
-
-        // After longer idle, fall asleep
-        idleTimer.current = setTimeout(() => {
-          stateRef.current = "sleeping";
-          setState("sleeping");
-        }, 8000);
-      }, 2000);
+      wake();
     }
 
     window.addEventListener("mousemove", onMouseMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMouseMove);
-  }, [mounted]);
+  }, [mounted, wake]);
+
+  // Scroll wakes it up too, same as mouse move — see the shared wake() above.
+  useEffect(() => {
+    if (!mounted) return;
+    function onScroll() {
+      wake();
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [mounted, wake]);
+
+  // Dim the avatar whenever it's currently overlapping the centered 720px
+  // reading column, so it doesn't visually block the text underneath.
+  useEffect(() => {
+    if (!mounted) return;
+    function check() {
+      const vw = window.innerWidth;
+      const buffer = 40;
+      const left = vw / 2 - 360 - buffer;
+      const right = vw / 2 + 360 + buffer;
+      setDimmed(pos.x > left && pos.x < right);
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [mounted, pos.x]);
 
   // Main animation loop
   useEffect(() => {
@@ -154,7 +226,8 @@ export default function AvatarCompanion({ onChatOpen, chatOpen }: AvatarCompanio
       style={{
         left: pos.x,
         top: pos.y,
-        transition: state === "walking" ? "none" : "left 0.3s, top 0.3s",
+        opacity: dimmed ? 0.35 : 1,
+        transition: `${state === "walking" ? "none" : "left 0.3s, top 0.3s"}, opacity 0.3s ease-out`,
       }}
     >
       {/* Speech bubble */}

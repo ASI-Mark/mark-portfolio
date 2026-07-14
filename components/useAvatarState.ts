@@ -31,7 +31,8 @@ export type AvatarAction =
   | { type: "CLICK" }
   | { type: "WAVE_DONE" }
   | { type: "ZONE_ENTER"; zone: Exclude<Zone, null> }
-  | { type: "ZONE_EXIT" };
+  | { type: "ZONE_EXIT" }
+  | { type: "DOCK"; x: number; y: number };
 
 const SPEED = 6;
 const CLOSE_ENOUGH = 48;
@@ -147,12 +148,41 @@ export function avatarReducer(
     case "ZONE_EXIT":
       return { ...state, activeZone: null };
 
+    // Walk toward a "dock" position (used before sleeping — see dockThenSleep
+    // in the hook below) — same mechanics as MOUSE_MOVE, just driven by code
+    // instead of the cursor.
+    case "DOCK": {
+      const facingLeft = action.x < state.posX;
+      return {
+        ...state,
+        animation: "walk",
+        targetX: action.x,
+        targetY: action.y,
+        facingLeft,
+      };
+    }
+
     default:
       return state;
   }
 }
 
 // --- React hook (uses reducer + DOM side effects) ---
+
+// Where the avatar should walk to before it's allowed to fall asleep —
+// bottom-right corner of the viewport, kept outside the centered 720px
+// reading column so it never naps on top of the article text. On viewports
+// too narrow to have room beside the column (~mobile-ish widths), fall back
+// to the literal corner — those widths already hide the avatar entirely via
+// the isMobile check in Avatar3D, so this is just a defensive fallback.
+function getDockPosition(): { x: number; y: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const roomRight = vw / 2 - 360; // px of space to the right of the 720px column
+  const x = roomRight > 100 ? vw - 70 : vw - 40;
+  const y = vh - 90;
+  return { x, y };
+}
 
 interface UseAvatarStateOptions {
   onChatOpen: () => void;
@@ -165,6 +195,10 @@ export interface AvatarStateResult {
   posX: number;
   posY: number;
   facingLeft: boolean;
+  // True when the avatar's current horizontal position overlaps the centered
+  // 720px reading column — consumer should dim the avatar so it doesn't
+  // obscure the text underneath.
+  dimmed: boolean;
   onAvatarClick: () => void;
 }
 
@@ -184,9 +218,18 @@ export function useAvatarState({
     zoneHold: null as ReturnType<typeof setTimeout> | null,
     jump: null as ReturnType<typeof setTimeout> | null,
     chat: null as ReturnType<typeof setTimeout> | null,
+    dockCheck: null as ReturnType<typeof setTimeout> | null,
   });
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Bumped every time a dock-then-sleep attempt is interrupted (mouse move,
+  // scroll, zone change) so an in-flight poll knows to abandon itself instead
+  // of dozing off at a stale target.
+  const dockTokenRef = useRef(0);
+  // Forward reference so dockThenSleep (declared before scheduleRandomWake)
+  // can still call the latest scheduleRandomWake once it's defined.
+  const scheduleRandomWakeRef = useRef<() => void>(() => {});
 
   // ---- Shared helpers ----
   const clearAllIdleTimers = useCallback(() => {
@@ -196,6 +239,36 @@ export function useAvatarState({
     if (t.sleep) { clearTimeout(t.sleep); t.sleep = null; }
     if (t.wave) { clearTimeout(t.wave); t.wave = null; }
     if (t.zoneHold) { clearTimeout(t.zoneHold); t.zoneHold = null; }
+    if (t.dockCheck) { clearTimeout(t.dockCheck); t.dockCheck = null; }
+    dockTokenRef.current++; // invalidate any in-flight dock-then-sleep attempt
+  }, []);
+
+  // Walk the avatar to the dock position, then fall asleep once it arrives
+  // (or after a generous timeout, so a stuck poll can't hang forever). This
+  // is the single place sleep gets triggered from — never dispatch "sleep"
+  // directly, or the avatar can nap on top of the article text.
+  const dockThenSleep = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const token = ++dockTokenRef.current;
+    const { x, y } = getDockPosition();
+    dispatch({ type: "DOCK", x, y });
+
+    const t = timersRef.current;
+    const startedAt = Date.now();
+    const poll = () => {
+      if (dockTokenRef.current !== token) return; // interrupted — abandon
+      const s = stateRef.current;
+      const dx = x - s.posX;
+      const dy = y - s.posY;
+      const arrived = Math.sqrt(dx * dx + dy * dy) <= CLOSE_ENOUGH;
+      if (arrived || Date.now() - startedAt > 6000) {
+        dispatch({ type: "SET_ANIM", animation: "sleep" });
+        scheduleRandomWakeRef.current();
+        return;
+      }
+      t.dockCheck = setTimeout(poll, 100);
+    };
+    poll();
   }, []);
 
   // After sleep, periodically wake up with a random animation, then return to sleep
@@ -205,13 +278,13 @@ export function useAvatarState({
       const pick = RANDOM_WAKE_POOL[Math.floor(Math.random() * RANDOM_WAKE_POOL.length)];
       dispatch({ type: "SET_ANIM", animation: pick });
       setTimeout(() => {
-        dispatch({ type: "SET_ANIM", animation: "sleep" });
-        scheduleRandomWake();
+        dockThenSleep();
       }, 2000);
     }, 10000 + Math.random() * 5000); // 10-15s
-  }, []);
+  }, [dockThenSleep]);
+  scheduleRandomWakeRef.current = scheduleRandomWake;
 
-  // Idle → sit → sleep → random wake
+  // Idle → sit → sleep (via dock) → random wake
   const startIdleChain = useCallback(() => {
     const t = timersRef.current;
     clearAllIdleTimers();
@@ -219,21 +292,19 @@ export function useAvatarState({
     t.sit = setTimeout(() => {
       dispatch({ type: "SET_ANIM", animation: "sit" });
       t.sleep = setTimeout(() => {
-        dispatch({ type: "SET_ANIM", animation: "sleep" });
-        scheduleRandomWake();
+        dockThenSleep();
       }, 2000);
     }, 2000);
-  }, [clearAllIdleTimers, scheduleRandomWake]);
+  }, [clearAllIdleTimers, dockThenSleep]);
 
   // Play a zone's signature sequence, then start idle chain
   const playZoneSequence = useCallback((zone: Exclude<Zone, null>) => {
     const sequence = ZONE_SEQUENCE[zone] || [];
     const t = timersRef.current;
 
-    // Footer: skip signature, go direct to sleep
+    // Footer: skip signature, go direct to sleep (still docks first)
     if (sequence.length === 0) {
-      dispatch({ type: "SET_ANIM", animation: "sleep" });
-      scheduleRandomWake();
+      dockThenSleep();
       return;
     }
 
@@ -249,7 +320,7 @@ export function useAvatarState({
       t.zoneHold = setTimeout(() => playStep(stepIdx + 1), step.duration);
     };
     playStep(0);
-  }, [startIdleChain, scheduleRandomWake]);
+  }, [startIdleChain, dockThenSleep]);
 
   // Initialize position
   useEffect(() => {
@@ -259,6 +330,20 @@ export function useAvatarState({
     dispatch({ type: "SET_POS", x: startX, y: startY });
     dispatch({ type: "IDLE_TIMEOUT" });
   }, []);
+
+  // Shared "go back to idle/zone-sequence after 2s of stillness" scheduler —
+  // used by both mouse move and scroll wake-ups below.
+  const scheduleIdleResume = useCallback(() => {
+    const t = timersRef.current;
+    t.idle = setTimeout(() => {
+      const z = stateRef.current.activeZone;
+      if (z) {
+        playZoneSequence(z);
+      } else {
+        startIdleChain();
+      }
+    }, 2000);
+  }, [playZoneSequence, startIdleChain]);
 
   // Mouse tracking
   useEffect(() => {
@@ -274,17 +359,7 @@ export function useAvatarState({
       }
 
       clearAllIdleTimers();
-      const t = timersRef.current;
-
-      // 2s no motion → replay zone sequence or go idle
-      t.idle = setTimeout(() => {
-        const z = stateRef.current.activeZone;
-        if (z) {
-          playZoneSequence(z);
-        } else {
-          startIdleChain();
-        }
-      }, 2000);
+      scheduleIdleResume();
     }
 
     window.addEventListener("mousemove", onMouseMove, { passive: true });
@@ -292,7 +367,25 @@ export function useAvatarState({
       window.removeEventListener("mousemove", onMouseMove);
       clearAllIdleTimers();
     };
-  }, [mounted, enabled, clearAllIdleTimers, playZoneSequence, startIdleChain]);
+  }, [mounted, enabled, clearAllIdleTimers, scheduleIdleResume]);
+
+  // Scroll wakes the avatar immediately too — a sleeping/sitting avatar
+  // shouldn't stay dozed off just because the mouse didn't move while the
+  // visitor scrolled past it.
+  useEffect(() => {
+    if (!mounted || !enabled) return;
+
+    function onScroll() {
+      clearAllIdleTimers();
+      if (stateRef.current.animation !== "wave") {
+        dispatch({ type: "SET_ANIM", animation: "idle" });
+      }
+      scheduleIdleResume();
+    }
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [mounted, enabled, clearAllIdleTimers, scheduleIdleResume]);
 
   // Animation loop for movement
   useEffect(() => {
@@ -398,11 +491,29 @@ export function useAvatarState({
     onChatOpen();
   }, [onChatOpen, clearAllIdleTimers]);
 
+  // Dim the avatar whenever it's currently overlapping the centered 720px
+  // reading column, so it doesn't visually block the text underneath.
+  const [dimmed, setDimmed] = useState(false);
+  useEffect(() => {
+    if (!mounted) return;
+    function check() {
+      const vw = window.innerWidth;
+      const buffer = 40; // rough half-width of the avatar sprite
+      const left = vw / 2 - 360 - buffer;
+      const right = vw / 2 + 360 + buffer;
+      setDimmed(state.posX > left && state.posX < right);
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [mounted, state.posX]);
+
   return {
     animation: state.animation,
     posX: state.posX,
     posY: state.posY,
     facingLeft: state.facingLeft,
+    dimmed,
     onAvatarClick,
   };
 }

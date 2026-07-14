@@ -230,10 +230,25 @@ export default function Avatar3D({ onChatOpen, chatOpen }: Avatar3DProps) {
     };
   }, []);
 
-  const { animation, posX, posY, facingLeft, onAvatarClick } = useAvatarState({
+  // Small screens / touch devices: hide the floating avatar entirely rather
+  // than showing the 3D model (or its 2D fallback) — not enough room, and
+  // there's no mouse to chase anyway.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    function update() {
+      const touch =
+        "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      setIsMobile(window.innerWidth < 768 || touch);
+    }
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  const { animation, posX, posY, facingLeft, dimmed, onAvatarClick } = useAvatarState({
     onChatOpen,
     chatOpen,
-    enabled: !chatOpen && !externallyPaused,
+    enabled: !chatOpen && !externallyPaused && !isMobile,
   });
 
   useEffect(() => {
@@ -259,13 +274,17 @@ export default function Avatar3D({ onChatOpen, chatOpen }: Avatar3DProps) {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  if (isMobile) return null;
   if (chatOpen) return null;
   if (!hasWebGL) {
     return <AvatarCompanion onChatOpen={onChatOpen} chatOpen={chatOpen} />;
   }
 
   return (
-    <div className="fixed inset-0 z-50 pointer-events-none">
+    <div
+      className="fixed inset-0 z-50 pointer-events-none"
+      style={{ opacity: dimmed ? 0.35 : 1, transition: "opacity 0.3s ease-out" }}
+    >
       {/* Invisible click hit area that follows the avatar — this is how the
           avatar stays clickable while everything else on the page remains
           interactive (FloatingArrow, links, buttons, etc.) */}
