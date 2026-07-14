@@ -14,7 +14,7 @@ export default function Experience() {
 
   return (
     <>
-      <section id="experience" className="py-32 px-6">
+      <section id="works" className="py-32 px-6">
         <div className="max-w-prose mx-auto">
           <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-4">
             我做过什么 / EXPERIENCE

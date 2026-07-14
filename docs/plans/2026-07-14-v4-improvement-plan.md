@@ -29,7 +29,7 @@
 - [x] 0.1 移除摄像头手势：ChinaMap.tsx 的 camera 模式分支、MapGesturePrompt.tsx、useHandTracking.ts、`@mediapipe/tasks-vision` 依赖，全部删除；鼠标模式保持原样
 - [x] 0.2 删死代码：ChinaGlobeMap.tsx、ChinaParticleMap.tsx、ScrollArrow.tsx、AnimatedNumber.tsx、`react-globe.gl` 依赖、public/globe/
 - [x] 0.3 清 public/ 孤儿资源（**删前逐个 grep 确认零引用**）：avatar.png、photo.jpg、wechat-qr.jpg、avatar-nobg-small.png、next.svg / vercel.svg / globe.svg / window.svg / file.svg —— 全部 9 个文件 grep 全代码确认零引用（含 docs/plans/ 也只是文字提及，非代码引用），全部删除，无需保留任何一个
-- [ ] 0.4 修导航死链：作品区 DOM id 统一为 `works`（page.tsx / Experience.tsx / Nav.tsx / useAvatarState.ts 四处口径一致）
+- [x] 0.4 修导航死链：作品区 DOM id 统一为 `works`（page.tsx / Experience.tsx / Nav.tsx / useAvatarState.ts 四处口径一致）—— Nav.tsx 和 useAvatarState.ts 本来就已经用 `works`，实际只需把 Experience.tsx 的 `id="experience"` 改成 `id="works"`；顺带发现 FloatingArrow.tsx 的 SECTIONS 数组和初始 nextSection 也硬编码了 `"experience"`（未在原计划列出但同源死链，一并修复）
 - [ ] 0.5 太空人行为修正：睡眠/躺平只允许发生在 720px 版心之外或屏幕角落（进入睡眠先移动到停靠位）；滚动或鼠标移动立即唤醒；遮挡正文时降透明度
 - [ ] 0.6 数字口径统一：static.json 抖音 2万→**4.7万**；worker/chat-worker.js 分身人设同步抖音 4.7 万（timeline 里「2024.8 一个月 0→2万」是当月史实，保留）
 - [ ] 0.7 移动端修复：nav 两字词禁止竖排拆行；「右键复位」文案触屏隐藏

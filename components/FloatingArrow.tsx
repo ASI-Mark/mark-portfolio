@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-const SECTIONS = ["experience", "beliefs", "mind", "timeline", "map", "recent", "guestbook"];
+const SECTIONS = ["works", "beliefs", "mind", "timeline", "map", "recent", "guestbook"];
 
 export default function FloatingArrow() {
-  const [nextSection, setNextSection] = useState<string | null>("experience");
+  const [nextSection, setNextSection] = useState<string | null>("works");
   const [nearBottom, setNearBottom] = useState(false);
 
   useEffect(() => {
