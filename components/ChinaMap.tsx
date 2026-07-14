@@ -120,6 +120,7 @@ export default function ChinaMap() {
   useEffect(() => {
     if (!mounted) return;
     typedCities.forEach((c) => {
+      if (c.photoCount === 0) return; // no photo to preload yet
       const img = document.createElement("img");
       img.src = `/cities/${c.name}_1.jpg`;
     });
@@ -409,14 +410,32 @@ export default function ChinaMap() {
               className="rounded-lg overflow-hidden relative"
               style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
             >
-              <Image
-                src={`/cities/${selected.name}_${photoIndex + 1}.jpg`}
-                alt={`${selected.name} - ${selected.label}`}
-                width={800}
-                height={600}
-                className="w-full h-auto object-cover"
-                style={{ maxHeight: "55vh" }}
-              />
+              {selected.photoCount > 0 ? (
+                <Image
+                  src={`/cities/${selected.name}_${photoIndex + 1}.jpg`}
+                  alt={`${selected.name} - ${selected.label}`}
+                  width={800}
+                  height={600}
+                  className="w-full h-auto object-cover"
+                  style={{ maxHeight: "55vh" }}
+                />
+              ) : (
+                // No photos yet for this city — show a placeholder instead of
+                // a broken image (see content/cities.json photoCount: 0).
+                <div
+                  className="w-full flex items-center justify-center"
+                  style={{
+                    aspectRatio: "4 / 3",
+                    background: "rgba(255,255,255,0.03)",
+                    color: "rgba(255,255,255,0.35)",
+                    fontFamily: "var(--font-sans)",
+                    fontSize: "13px",
+                    letterSpacing: "0.15em",
+                  }}
+                >
+                  照片待补
+                </div>
+              )}
 
               {/* Gallery navigation overlay */}
               {selected.photoCount > 1 && (
