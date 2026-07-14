@@ -60,6 +60,12 @@ export default function Hero() {
   const [completed, setCompleted] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
 
+  // Touch devices have no right-click, so "右键复位" is meaningless there.
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    setIsTouch("ontouchstart" in window || navigator.maxTouchPoints > 0);
+  }, []);
+
   // Track the current transform purely in a ref — no React state, no
   // framer-motion, no re-render churn. The DOM element is always the
   // source of truth for flashlight position.
@@ -448,7 +454,7 @@ export default function Hero() {
             // are driven imperatively via writeTransform/animateTo to avoid
             // React re-renders wiping them during the reveal sequence.
             style={{ touchAction: "none" }}
-            aria-label="手电筒——拖动我扫过文字，右键复位"
+            aria-label={isTouch ? "手电筒——拖动我扫过文字" : "手电筒——拖动我扫过文字，右键复位"}
           >
             {!dragging && !revealed && !completed && (
               <>
@@ -489,7 +495,7 @@ export default function Hero() {
                 className="font-sans text-[10px] tracking-widest whitespace-nowrap pointer-events-none"
                 style={{ color: nightActive ? "#ccc" : "#888" }}
               >
-                拖动我 · 右键复位
+                拖动我{!isTouch && " · 右键复位"}
               </span>
             )}
           </div>
