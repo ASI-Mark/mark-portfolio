@@ -35,7 +35,7 @@
 - [x] 0.7 移动端修复：nav 两字词禁止竖排拆行；「右键复位」文案触屏隐藏 —— Nav.tsx 给 `<a>` 加 `whitespace-nowrap shrink-0`（防止 CJK 逐字换行）+ 外层容器 `overflow-x-auto`（超窄屏可横滑兜底，不裁切）；Hero.tsx 新增 `isTouch` 检测（`ontouchstart`/`maxTouchPoints`），触屏隐藏「· 右键复位」文案和对应 aria-label 片段，保留「拖动我」
 - [x] 0.8 Footer「最后更新」是构建时间固化值 → 改成「构建于 {日期}」或删掉 —— 选了改文案（保留日期展示，只改措辞，不产生误导性的"实时更新"暗示）
 - [x] 0.9 城市照片清理（审查报告已出）：按保留名单删 42 张、每城重新编号、cities.json 的 photoCount 同步、ChinaMap 对 photoCount=0 的城市（秦皇岛/杭州）不崩且有兜底文案 —— 用一次性脚本（两阶段 rename，先挪临时名再落编号，避免同城内编号冲突）执行删除+重编号，83→41 张，逐城校验（脚本核对 keep 索引确实存在）+ 事后用脚本比对 cities.json 的 photoCount 与实际文件数逐城全部一致；ChinaMap.tsx 相册弹窗对 photoCount===0 时不再渲染 `<Image>`（避免 404 裂图），改显示「照片待补」占位块，预加载 effect 同步跳过 photoCount===0 的城市
-- [ ] 0.10 `npm run test` 全过 + `next build` 出新 out/
+- [x] 0.10 `npm run test` 全过 + `next build` 出新 out/ —— 60 个测试全过；`npx next build` 成功（Next.js 16.2.3 + Turbopack，编译 1.8s + TypeScript 检查 1.6s + 静态生成 4/4 页面全部 ○ Static）；out/ 16M，out/cities 41 张照片与预期一致；grep out/ 全目录确认零 mediapipe/globe/手势组件残留 chunk
 - [ ] 0.11 部署上线 ⚠️**需要马克**：选一个——
   - a) 马克跑一次 `wrangler login`，之后我用 `wrangler pages deploy out/` 上线（以后我可以自动部署）
   - b) 马克在 CF Pages dashboard 手动上传新 out/
