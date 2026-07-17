@@ -31,15 +31,28 @@
     user-select: none;
   }
 
-  /* fixed + inset:0 —— 真居中，规避 100vw 滚动条误差（沿用 v3 的教训） */
+  /* fixed + inset:0 —— 真居中，规避 100vw 滚动条误差（沿用 v3 的教训）
+     perspective 给 #scene 的 rotateX/rotateY 提供 3D 透视深度 */
   #stage{
     position: fixed;
     inset: 0;
     overflow: hidden;
     cursor: none;
+    perspective: 1100px;
   }
 
   #actOne, #actTwo{ position: static; }
+
+  /* 三层视差场景容器：底纹(远 0.4) / 画面(中 1.0) / 悬浮句(近 1.7)。
+     指针驱动整个 scene 轻微 rotateX/rotateY(±2.2°)，各层再按系数反向平移，
+     近层(字)与中层(心)的位移差 = 立体错位感的来源。 */
+  #scene{
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+  #textureLayer, #phraseLayer{ will-change: transform; }
 
   /* ---------- 1. 记忆底纹（保留但调淡） ---------- */
   #textureLayer{
@@ -111,6 +124,24 @@
   #corruptCanvas{ display: block; }
   #heartStage.clickable{ pointer-events: auto; cursor: pointer; }
 
+  /* 心跳搏动层：椭圆 mask 只露心脏本体+主动脉根部，边缘羽化防错缝 */
+  #beatLayer{
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+    transform-origin: 51% 47%;
+    -webkit-mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0,0,0,0.5) 80%, transparent 100%);
+    mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0,0,0,0.5) 80%, transparent 100%);
+  }
+  #healedImgBeat, #corruptCanvasBeat{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+
   /* ---------- 3. 悬浮句云（挤出字，去卡片版） ---------- */
   #phraseLayer{
     position: absolute;
@@ -126,6 +157,8 @@
     font-weight: 500;
     line-height: 1;
     text-shadow:
+      0 0 7px rgba(250,250,248,0.9),
+      0 0 14px rgba(250,250,248,0.5),
       0.4px 0.6px 0 rgba(26,26,26,0.85),
       0.8px 1.2px 0 rgba(26,26,26,0.76),
       1.2px 1.8px 0 rgba(26,26,26,0.66),
@@ -383,20 +416,27 @@
 <div id="stage">
 
   <div id="actOne">
-    <div id="stageWarmth"></div>
-    <div id="textureLayer">
-      <div id="textureBase"></div>
-      <div id="textureReal"></div>
-    </div>
-
-    <div id="heartStage">
-      <div id="heartWrap">
-        <img id="healedImg" src="heart-healed.jpg" alt="" draggable="false">
-        <canvas id="corruptCanvas" width="1024" height="1536"></canvas>
+    <div id="scene">
+      <div id="stageWarmth"></div>
+      <div id="textureLayer">
+        <div id="textureBase"></div>
+        <div id="textureReal"></div>
       </div>
-    </div>
 
-    <div id="phraseLayer"></div>
+      <div id="heartStage">
+        <div id="heartWrap">
+          <img id="healedImg" src="heart-healed.jpg" alt="" draggable="false">
+          <canvas id="corruptCanvas" width="1024" height="1536"></canvas>
+          <!-- 心跳搏动层：同内容复制 + 椭圆遮罩只露心脏，独立缩放，外围静止 -->
+          <div id="beatLayer">
+            <img id="healedImgBeat" src="heart-healed.jpg" alt="" draggable="false">
+            <canvas id="corruptCanvasBeat" width="1024" height="1536"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div id="phraseLayer"></div>
+    </div>
 
     <div id="veil"></div>
 
@@ -454,6 +494,9 @@
   <label>治愈完成阈值 %
     <div class="row"><input type="range" id="p-healThreshold" min="70" max="100" step="1"><span class="val" id="v-healThreshold"></span></div>
   </label>
+  <label>视差强度
+    <div class="row"><input type="range" id="p-parallax" min="0" max="2" step="0.1"><span class="val" id="v-parallax"></span></div>
+  </label>
 </div>
 
 <script>
@@ -473,8 +516,11 @@
     healThresholdPct: 92,     // 全局治愈完成阈值 %
     handThresholdPct: 60,     // 单手灰飞湮灭阈值 %
     restBpmBonusPerHand: 6,
-    idleSampleMs: 500
+    idleSampleMs: 500,
+    parallaxStrength: 1       // 三层视差强度倍率（0=关）
   };
+
+  var parX = 0, parY = 0; // 视差平滑量
 
   var REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -509,6 +555,25 @@
 
   var root = document.documentElement;
   var ctx = corruptCanvas.getContext('2d', { willReadFrequently: true });
+
+  /* 心跳搏动层 + 视差场景 */
+  var sceneEl = document.getElementById('scene');
+  var textureLayerEl = document.getElementById('textureLayer');
+  var beatLayerEl = document.getElementById('beatLayer');
+  var corruptCanvasBeat = document.getElementById('corruptCanvasBeat');
+  var beatCtx = corruptCanvasBeat.getContext('2d');
+  var beatDirty = true; // 基底 canvas 被擦过 → 下一帧同步搏动层副本
+  function syncBeatCanvas(){
+    beatCtx.clearRect(0, 0, corruptCanvasBeat.width, corruptCanvasBeat.height);
+    beatCtx.drawImage(corruptCanvas, 0, 0);
+    beatDirty = false;
+  }
+  function setBeatTransform(str, transition){
+    beatLayerEl.style.transition = transition === undefined ? '' : transition;
+    beatLayerEl.style.transform = str;
+  }
+  // reduced-motion 下心跳不跑、副本不同步 → 整层隐藏，静态场景只看基底
+  if (REDUCED_MOTION) beatLayerEl.style.display = 'none';
 
   /* ============================================================
      记忆底纹（与 v3 一致，调淡）
@@ -651,6 +716,7 @@
      刮刮卡治愈 —— canvas destination-out 软边刷擦除
      ============================================================ */
   function stampBrush(cx, cy, r){
+    beatDirty = true;
     ctx.save();
     ctx.globalCompositeOperation = 'destination-out';
     var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
@@ -853,14 +919,12 @@
     phraseLayerEl.innerHTML = '';
     phraseSpans = [];
     for (var i=0;i<PHRASE_OLD.length;i++){
-      var col = i < 10 ? 'L' : 'R';
-      var idx = i < 10 ? i : i-10;
       var span = document.createElement('span');
       span.className = 'phrase-ch';
       span.textContent = PHRASE_OLD[i];
       phraseLayerEl.appendChild(span);
       phraseSpans.push({
-        el: span, col: col, idx: idx,
+        el: span, idx: i,
         baseX: 0, baseY: 0,
         phase: Math.random()*Math.PI*2,
         amp: 6 + Math.random()*4,
@@ -869,26 +933,28 @@
     }
   }
 
-  var PHRASE_SIDE_OFFSET = 0.14;
-  var PHRASE_BULGE = 0.06;
-
+  /* 一条被风吹弯的弧线横在画里：起于左侧白羽外沿，掠过心脏下方羊皮纸，收在右中。
+     读序从左到右；对可见字重新求 t，morph 后 10 字沿同一条弧自动重排。 */
   function layoutPhraseCloud(){
     var r = heartStageEl.getBoundingClientRect();
-    var topY = r.top - r.height*0.02;
-    var bottomY = r.bottom + r.height*0.00;
-    var leftX = r.left - r.width*PHRASE_SIDE_OFFSET;
-    var rightX = r.right + r.width*PHRASE_SIDE_OFFSET;
-    var bulge = r.width*PHRASE_BULGE;
+    var vw = window.innerWidth;
+    var narrow = vw < 600;
+    var visible = phraseSpans.filter(function(p){ return !p.el.classList.contains('gone'); });
+    var n = Math.max(2, visible.length);
+    var xStart = r.left - r.width*(narrow ? 0.04 : 0.17);
+    var xEnd   = r.right + r.width*(narrow ? 0.04 : 0.17);
+    var yBase  = narrow ? 0.63 : 0.60;
+    var yDip   = narrow ? 0.15 : 0.17;
 
-    phraseSpans.forEach(function(p){
-      var t = p.idx/9;
-      var y = topY + t*(bottomY-topY);
-      var x;
-      if (p.col === 'L'){
-        x = leftX - Math.sin(t*Math.PI)*bulge;
-      } else {
-        x = rightX + Math.sin(t*Math.PI)*bulge;
-      }
+    visible.forEach(function(p, k){
+      var t = k/(n-1);
+      var x = xStart + t*(xEnd - xStart);
+      var y = r.top + r.height*(yBase + yDip*Math.sin(t*Math.PI));
+      x = Math.max(10, Math.min(vw - 26, x));
+      // 字沿弧线切线旋转（像写在曲线上），倾斜的相邻字读作笔势而非错乱
+      var slope = yDip*Math.PI*Math.cos(t*Math.PI) * r.height / (xEnd - xStart);
+      var rot = Math.atan(slope) * 180/Math.PI;
+      p.rot = Math.max(-18, Math.min(18, rot));
       p.baseX = x; p.baseY = y;
       p.el.style.left = x.toFixed(1) + 'px';
       p.el.style.top = y.toFixed(1) + 'px';
@@ -900,7 +966,7 @@
       var p = phraseSpans[i];
       if (p.el.classList.contains('gone')) continue;
       var off = Math.sin(ts*p.speed + p.phase) * p.amp;
-      p.el.style.transform = 'translateY(' + off.toFixed(1) + 'px)';
+      p.el.style.transform = 'translateY(' + off.toFixed(1) + 'px) rotate(' + (p.rot || 0).toFixed(1) + 'deg)';
     }
   }
 
@@ -919,17 +985,15 @@
     var fadeOutMs = phraseSpans.length*45 + 460;
 
     setTimeout(function(){
-      // 多余字位收拢：L/R 各只留前 5 个承接新句，其余彻底隐去
+      // 前 10 个字位承接新句，其余彻底隐去；新句沿同一条弧线重排
       phraseSpans.forEach(function(p){
-        if (p.idx >= 5){
+        if (p.idx >= PHRASE_NEW.length){
           p.el.classList.add('gone');
         }
       });
+      layoutPhraseCloud();
 
-      var newIdx = 0;
-      for (var i=0;i<phraseSpans.length;i++){
-        var p = phraseSpans[i];
-        if (p.idx >= 5) continue;
+      for (var i=0;i<PHRASE_NEW.length && i<phraseSpans.length;i++){
         (function(p, newIdx){
           setTimeout(function(){
             p.el.textContent = PHRASE_NEW[newIdx] || '';
@@ -938,8 +1002,7 @@
             // 强制回流，确保 blur 淡入而非跳变
             void p.el.offsetWidth;
           }, newIdx*70);
-        })(p, newIdx);
-        newIdx++;
+        })(phraseSpans[i], i);
       }
     }, fadeOutMs);
   }
@@ -1009,21 +1072,28 @@
       corruptCanvas.style.display = 'none';
       resetPhraseCloud();
       phraseSpans.forEach(function(p){
-        if (p.idx < 5){
-          var newIdx = p.col === 'L' ? p.idx : p.idx + 5;
-          p.el.textContent = PHRASE_NEW[newIdx] || '';
+        if (p.idx < PHRASE_NEW.length){
+          p.el.textContent = PHRASE_NEW[p.idx] || '';
         } else {
           p.el.classList.add('gone');
         }
       });
+      layoutPhraseCloud();
       actOneFinished = true;
       return;
     }
 
-    // 1. 自动补完：canvas 淡出显露完整治愈态
+    // 1. 自动补完：canvas（含搏动层副本）淡出显露完整治愈态
     corruptCanvas.style.transition = 'opacity 700ms cubic-bezier(0.22,1,0.36,1)';
-    requestAnimationFrame(function(){ corruptCanvas.style.opacity = '0'; });
-    setTimeout(function(){ corruptCanvas.style.display = 'none'; }, 720);
+    corruptCanvasBeat.style.transition = 'opacity 700ms cubic-bezier(0.22,1,0.36,1)';
+    requestAnimationFrame(function(){
+      corruptCanvas.style.opacity = '0';
+      corruptCanvasBeat.style.opacity = '0';
+    });
+    setTimeout(function(){
+      corruptCanvas.style.display = 'none';
+      corruptCanvasBeat.style.display = 'none';
+    }, 720);
 
     // 2. 心脏大搏 + 振翅一拍
     pauseBeatUntil = Infinity;
@@ -1279,9 +1349,14 @@
     corruptCanvas.style.transition = '';
     corruptCanvas.style.opacity = '1';
     corruptCanvas.style.display = 'block';
+    corruptCanvasBeat.style.transition = '';
+    corruptCanvasBeat.style.opacity = '1';
+    corruptCanvasBeat.style.display = 'block';
     redrawCorruptFull();
+    beatDirty = true;
 
     setHeartWrapTransform('scale(1)');
+    setBeatTransform('scale(1)');
     resetPhraseCloud();
 
     beatTime = 0;
@@ -1320,6 +1395,9 @@
       if (!finaleFired) sampleProgress();
     }
 
+    // 搏动层内容同步（有擦除才拷贝，一帧至多一次 drawImage）
+    if (beatDirty) syncBeatCanvas();
+
     if (ts >= pauseBeatUntil){
       beatTime += dt;
       var targetBpm = PARAMS.restBpm + restBpmBonus + overallErasedFraction*10;
@@ -1327,14 +1405,29 @@
       var Tc = 60000 / Math.max(1, bpmSmoothed);
       var phase = beatTime % Tc;
       var ampFactor = 1 + (disintegratedCount/HANDS.length) * 0.35;
-      var s = heartScaleAt(phase, ampFactor);
-      setHeartWrapTransform('scale(' + s.toFixed(4) + ')');
+      // 心跳只作用于搏动层（椭圆遮罩内的心脏本体），外围翅膀/纸面静止
+      var s = 1 + (heartScaleAt(phase, ampFactor) - 1) * 0.62; // 压幅防遮罩边缘错缝
+      setBeatTransform('scale(' + Math.min(s, 1.025).toFixed(4) + ')');
 
       if (!finaleFired){
-        var pulseNorm = Math.max(0, (s-1)) / (0.045 * ampFactor);
+        var pulseNorm = Math.max(0, (s-1)) / (0.028 * ampFactor);
         var warm = Math.min(0.9, overallErasedFraction*0.5 + pulseNorm*0.15);
-        corruptCanvas.style.filter = 'brightness(' + (1 - warm*0.08 + pulseNorm*0.03).toFixed(3) + ')';
+        var filterStr = 'brightness(' + (1 - warm*0.08 + pulseNorm*0.03).toFixed(3) + ')';
+        corruptCanvas.style.filter = filterStr;
+        corruptCanvasBeat.style.filter = filterStr;
       }
+    }
+
+    // 三层深度视差：底纹(远)反向小移 / 画面(中)不动 / 悬浮句(近)同向大移
+    if (!REDUCED_MOTION){
+      var pk = PARAMS.parallaxStrength;
+      var tnx = (pointerX / window.innerWidth - 0.5) * 2;
+      var tny = (pointerY / window.innerHeight - 0.5) * 2;
+      parX += (tnx - parX) * Math.min(1, dt * 0.004);
+      parY += (tny - parY) * Math.min(1, dt * 0.004);
+      sceneEl.style.transform = 'rotateX(' + (-parY*2.2*pk).toFixed(3) + 'deg) rotateY(' + (parX*2.2*pk).toFixed(3) + 'deg)';
+      textureLayerEl.style.transform = 'translate(' + (-parX*8*pk).toFixed(1) + 'px,' + (-parY*8*pk).toFixed(1) + 'px)';
+      phraseLayerEl.style.transform = 'translate(' + (parX*14*pk).toFixed(1) + 'px,' + (parY*14*pk).toFixed(1) + 'px)';
     }
 
     requestAnimationFrame(mainFrame);
@@ -1412,7 +1505,8 @@
       { id: 'p-restBpm', val: 'v-restBpm', key: 'restBpm', decimals: 0 },
       { id: 'p-veilStrength', val: 'v-veilStrength', key: 'veilStrength', decimals: 2, onChange: function(v){ root.style.setProperty('--veil-strength', v); } },
       { id: 'p-textureOpacity', val: 'v-textureOpacity', key: 'textureOpacityMax', decimals: 2, onChange: function(v){ root.style.setProperty('--texture-real-opacity-max', v); } },
-      { id: 'p-healThreshold', val: 'v-healThreshold', key: 'healThresholdPct', decimals: 0 }
+      { id: 'p-healThreshold', val: 'v-healThreshold', key: 'healThresholdPct', decimals: 0 },
+      { id: 'p-parallax', val: 'v-parallax', key: 'parallaxStrength', decimals: 1 }
     ];
 
     map.forEach(function(m){
@@ -1524,6 +1618,7 @@
 
       if (REDUCED_MOTION){
         corruptCanvas.style.filter = '';
+        corruptCanvasBeat.style.filter = '';
         initReducedMotionClick();
       } else {
         requestAnimationFrame(mainFrame);
