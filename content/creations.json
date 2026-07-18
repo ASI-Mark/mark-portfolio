@@ -1,0 +1,106 @@
+{
+  "intro": "我用 AI 把自己的生活一件一件系统化。这些不是作品集，是还在跑的日常。",
+  "note": "状态与数字截至 2026-07；标注「待确认」的数字上线前逐条与马克核对。",
+  "items": [
+    {
+      "id": "coach-v2",
+      "date": "2026.03",
+      "status": "run",
+      "name": "Coach 教练",
+      "tagline": "飞书+微信双通道的个人成长教练，每天早八推待办、深夜问明天、周日带我复盘",
+      "metric": "每天 3 次准点推送，双通道在跑",
+      "metricConfirmed": false,
+      "detail": "去抖合并、双路 LLM、回原渠道并写入 Obsidian 日记。待办总表回个数字就划掉，周日复盘自动带长期目标。它是我所有系统里最像'人'的一个。"
+    },
+    {
+      "id": "xuanti",
+      "date": "2026.06",
+      "status": "run",
+      "name": "选题工作台",
+      "tagline": "每天扫我的日志、录音和对标库，把有自媒体潜力的想法自动拎出来推给我",
+      "metric": "四个入口归一，每日雷达在跑",
+      "metricConfirmed": false,
+      "detail": "收件箱/对标表/追踪表/雷达候选四个落点，curl-only 铁律，双库单向同步。选题从'想起来才找'变成'每天送上门'。"
+    },
+    {
+      "id": "coachboard",
+      "date": "2026.07",
+      "status": "run",
+      "name": "知识库教练台",
+      "tagline": "纯 Node 零依赖的私人仪表盘：判断卡、转化漏斗、链路体检每天自动出",
+      "metric": "chain-lint 哨兵每日点名",
+      "metricConfirmed": false,
+      "detail": "不装框架不接数据库，自渲染脚本+AI 判断层。系统哪里在漂移，早上打开就知道。"
+    },
+    {
+      "id": "memory",
+      "date": "2026.07",
+      "status": "run",
+      "name": "AI 记忆系统",
+      "tagline": "向量库+知识图谱的长期记忆，AI 判官自动分拣每天的对话沉淀",
+      "metric": "判官三轮 dry-run 零危险误判后上岗",
+      "metricConfirmed": false,
+      "detail": "A/B/C/R 四类分拣：规则入库、流水丢弃、临时过期、拿不准的进人工队列。记忆不再靠我手动整理。"
+    },
+    {
+      "id": "money-coach",
+      "date": "2026.07",
+      "status": "run",
+      "name": "记账资金管家",
+      "tagline": "记一笔账、看一眼钱的去向，修复按'类'不按'例'",
+      "metric": "每修一处独立提交，测试过才上线",
+      "metricConfirmed": false,
+      "detail": "从'排障排到怀疑人生'里长出来的纪律：修 bug 先归类，同类全覆盖进回归测试。"
+    },
+    {
+      "id": "boss-tracker",
+      "date": "2026.06",
+      "status": "run",
+      "name": "求职追踪器",
+      "tagline": "抓 Boss 直聘沟通列表、主动搜岗、JD 对着我的简历逐条打分排序",
+      "metric": "JD×简历匹配打分在跑",
+      "metricConfirmed": false,
+      "detail": "登录态掉了还能远程拉起调试浏览器、把二维码发到我手机上扫。骑驴找马的马厩管理员。"
+    },
+    {
+      "id": "lingxi",
+      "date": "2026.05",
+      "status": "run",
+      "name": "灵犀",
+      "tagline": "每天一份财务快照和心事清单，安静地看着我的钱和我的念头",
+      "metric": "每日快照在跑",
+      "metricConfirmed": false,
+      "detail": "最小的一个系统，也是最私人的一个。"
+    },
+    {
+      "id": "koubo",
+      "date": "2026.06",
+      "status": "paused",
+      "name": "口播白板",
+      "tagline": "录口播时的提词白板",
+      "metric": "搁置中",
+      "metricConfirmed": false,
+      "detail": "做了，能用，但拍摄流程变了它就闲下来了。留着，不删。"
+    },
+    {
+      "id": "openclaw",
+      "date": "2025.12",
+      "status": "retired",
+      "name": "OpenClaw 网关",
+      "tagline": "曾经管着我所有 Telegram/飞书 bot 的网关系统",
+      "metric": "2026.06.21 退役",
+      "metricConfirmed": true,
+      "detail": "OAuth 后端被封 + 架构过重，果断整摊退役，转向更轻的飞书/微信直连。公开退役史比全绿的仪表盘诚实——止损也是能力。"
+    },
+    {
+      "id": "this-site",
+      "date": "2026.04",
+      "status": "run",
+      "name": "这个网站",
+      "tagline": "你正在看的东西本身——包括进门时那颗被火种照亮的心",
+      "metric": "push 即上线，AI 全程共建",
+      "metricConfirmed": true,
+      "detail": "从设计、出图到交互代码，和 AI 一起搓出来的。第一幕的每一次灰飞湮灭，都是这套工作流的证据。"
+    }
+  ]
+}
