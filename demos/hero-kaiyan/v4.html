@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>开眼 v4 · 火种照心 demo</title>
+<style>
+  :root{
+    --mx: 50vw;
+    --my: 42vh;
+    --brush-radius: 60px;
+    --veil-strength: 0.08;
+    --texture-base-opacity: 0.015;
+    --texture-real-opacity-max: 0.18;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #FAFAF8;
+    color: #1A1A1A;
+    font-family: "Songti SC", "STSong", serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* fixed + inset:0 —— 真居中，规避 100vw 滚动条误差（沿用 v3 的教训）
+     perspective 给 #scene 的 rotateX/rotateY 提供 3D 透视深度 */
+  #stage{
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    cursor: none;
+    perspective: 1100px;
+  }
+
+  #actOne, #actTwo{ position: static; }
+
+  /* 三层视差场景容器：底纹(远 0.4) / 画面(中 1.0) / 悬浮句(近 1.7)。
+     指针驱动整个 scene 轻微 rotateX/rotateY(±2.2°)，各层再按系数反向平移，
+     近层(字)与中层(心)的位移差 = 立体错位感的来源。 */
+  #scene{
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+  #textureLayer, #phraseLayer{ will-change: transform; }
+
+  /* ---------- 1. 记忆底纹（保留但调淡） ---------- */
+  #textureLayer{
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  #textureBase, #textureReal{
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  #textureBase{ opacity: var(--texture-base-opacity); }
+  #textureReal{
+    opacity: var(--texture-real-opacity-max);
+    -webkit-mask-image: radial-gradient(circle var(--brush-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(circle var(--brush-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+  }
+  .memory-phrase{
+    position: absolute;
+    white-space: nowrap;
+    color: #1A1A1A;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- 2. 心脏刮刮卡舞台 ---------- */
+  #heartStage{
+    position: absolute;
+    left: 50%;
+    top: 44vh;
+    transform: translate(-50%, -50%);
+    width: var(--heart-w, min(92vw, 53vh));
+    aspect-ratio: 1024 / 1536;
+    z-index: 2;
+    overflow: visible;
+  }
+  #heartWrap{
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+    /* 边缘羽化：把矩形素材融进页面，消掉"海报钉墙上"的硬边 */
+    -webkit-mask-image: radial-gradient(ellipse 72% 66% at 50% 48%, #000 58%, rgba(0,0,0,0.55) 78%, transparent 98%);
+    mask-image: radial-gradient(ellipse 72% 66% at 50% 48%, #000 58%, rgba(0,0,0,0.55) 78%, transparent 98%);
+  }
+  /* 画面暖调向纸白的二级过渡垫层，接住羽化后的边缘 */
+  #stageWarmth{
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse 60% 55% at 50% 44%,
+      rgba(196, 178, 142, 0.5) 0%,
+      rgba(214, 199, 168, 0.28) 45%,
+      rgba(230, 222, 204, 0.12) 70%,
+      transparent 100%);
+  }
+  #healedImg, #corruptCanvas{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+  #healedImg{ object-fit: fill; }
+  #corruptCanvas{ display: block; }
+  #heartStage.clickable{ pointer-events: auto; cursor: pointer; }
+
+  /* 心跳搏动层：椭圆 mask 只露心脏本体+主动脉根部，边缘羽化防错缝 */
+  #beatLayer{
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+    transform-origin: 51% 47%;
+    -webkit-mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0,0,0,0.5) 80%, transparent 100%);
+    mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0,0,0,0.5) 80%, transparent 100%);
+  }
+  #healedImgBeat, #corruptCanvasBeat{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+
+  /* ---------- 3. 悬浮句云（挤出字，去卡片版） ---------- */
+  #phraseLayer{
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .phrase-ch{
+    position: absolute;
+    display: inline-block;
+    color: #1A1A1A;
+    font-size: clamp(15px, 2.1vw, 21px);
+    font-weight: 500;
+    line-height: 1;
+    text-shadow:
+      0 0 7px rgba(250,250,248,0.9),
+      0 0 14px rgba(250,250,248,0.5),
+      0.4px 0.6px 0 rgba(26,26,26,0.85),
+      0.8px 1.2px 0 rgba(26,26,26,0.76),
+      1.2px 1.8px 0 rgba(26,26,26,0.66),
+      1.6px 2.4px 0 rgba(26,26,26,0.56),
+      2.0px 3.0px 0 rgba(26,26,26,0.46),
+      2.4px 3.6px 0 rgba(26,26,26,0.36),
+      2.8px 4.2px 1px rgba(26,26,26,0.22);
+    opacity: 1;
+    filter: blur(0);
+    transition: opacity 450ms cubic-bezier(0.22,1,0.36,1), filter 450ms cubic-bezier(0.22,1,0.36,1);
+    will-change: transform;
+  }
+  .phrase-ch.fading{ opacity: 0; filter: blur(4px); }
+  .phrase-ch.gone{ opacity: 0; filter: blur(4px); pointer-events: none; }
+
+  /* ---------- 4. 暗纱 ---------- */
+  #veil{
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: #1A1A1A;
+    opacity: var(--veil-strength);
+    -webkit-mask-image: radial-gradient(circle var(--brush-radius) at var(--mx) var(--my), transparent 0%, transparent 58%, black 100%);
+    mask-image: radial-gradient(circle var(--brush-radius) at var(--mx) var(--my), transparent 0%, transparent 58%, black 100%);
+    pointer-events: none;
+  }
+  #veil.hidden{ opacity: 0 !important; }
+
+  /* ---------- 5. 火星 / 灰烬粒子画布 ---------- */
+  #fxCanvas{
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  /* ---------- 6. 火种光标 ---------- */
+  #fireCursor{
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 6;
+    pointer-events: none;
+    will-change: transform;
+  }
+  #flameGlow{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: calc(var(--brush-radius) * 2.1);
+    height: calc(var(--brush-radius) * 2.1);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle,
+      rgba(232,201,125,0.32) 0%,
+      rgba(232,201,125,0.14) 42%,
+      rgba(139,46,46,0.05) 72%,
+      rgba(139,46,46,0) 100%);
+    filter: blur(6px);
+  }
+  #flameOuter{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30px;
+    height: 42px;
+    margin-left: -15px;
+    margin-top: -34px;
+    border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+    background: radial-gradient(ellipse at 50% 72%, #E8C97D 0%, #E8C97D 38%, #8B2E2E 78%, rgba(139,46,46,0) 100%);
+    opacity: 0.88;
+    transform-origin: 50% 88%;
+  }
+  #flameCore{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 13px;
+    height: 21px;
+    margin-left: -6.5px;
+    margin-top: -26px;
+    border-radius: 50% 50% 50% 50% / 65% 65% 35% 35%;
+    background: radial-gradient(ellipse at 50% 75%, #FAFAF8 0%, #E8C97D 55%, #8B2E2E 100%);
+    opacity: 0.96;
+    transform-origin: 50% 88%;
+  }
+
+  /* ---------- 提示 / 跳过 ---------- */
+  #hint{
+    position: absolute;
+    top: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 11;
+    font-size: 13px;
+    color: rgba(26,26,26,0.34);
+    letter-spacing: 0.06em;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1200ms ease-out;
+  }
+  #hint.hidden{ opacity: 0; }
+
+  #returningHint{
+    position: absolute;
+    top: 20px;
+    left: 24px;
+    z-index: 11;
+    font-size: 12px;
+    color: rgba(26,26,26,0.4);
+    letter-spacing: 0.04em;
+    display: none;
+  }
+  #returningHint a{
+    color: rgba(139,46,46,0.72);
+    text-decoration: none;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  #returningHint a:hover{ color: #8B2E2E; }
+
+  #skipLink{
+    position: absolute;
+    right: 22px;
+    bottom: 20px;
+    z-index: 11;
+    font-size: 12px;
+    color: rgba(26,26,26,0.32);
+    letter-spacing: 0.04em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 900ms ease-out;
+    cursor: pointer;
+  }
+  #skipLink.show{ opacity: 1; pointer-events: auto; }
+  #skipLink:hover{ color: #8B2E2E; }
+
+  /* ---------- 面板开关（触屏） ---------- */
+  #panelToggle{
+    position: fixed;
+    right: 8px;
+    bottom: 8px;
+    z-index: 201;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: #1A1A1A;
+    opacity: 0.3;
+    font-size: 14px;
+    line-height: 24px;
+    text-align: center;
+    cursor: pointer;
+    pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #panelToggle:active{ opacity: 0.6; }
+
+  /* ---------- 眨眼转场（复用 v3 真人眼睑曲线） ---------- */
+  #eyelidTop, #eyelidBottom{
+    position: fixed;
+    left: 0;
+    width: 100%;
+    background: #1A1A1A;
+    z-index: 100;
+    pointer-events: none;
+  }
+  #eyelidTop{
+    top: 0;
+    height: 78vh;
+    transform: translateY(calc(-100% - 32px));
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,0.25));
+  }
+  #eyelidBottom{
+    bottom: 0;
+    height: 34vh;
+    transform: translateY(calc(100% + 32px));
+    filter: drop-shadow(0 -8px 20px rgba(0,0,0,0.25));
+  }
+
+  /* ---------- 第二幕 ---------- */
+  #actTwo{ display: none; }
+  #actTwoInner{
+    position: absolute;
+    inset: 0;
+    background: #FAFAF8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  #actTwoTitle{
+    font-size: clamp(32px, 6vw, 56px);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: #1A1A1A;
+  }
+  #actTwoSub{
+    margin-top: 18px;
+    font-size: 14px;
+    color: rgba(26,26,26,0.5);
+    letter-spacing: 0.04em;
+  }
+  #replayLink{
+    position: absolute;
+    top: 20px;
+    left: 24px;
+    font-size: 12px;
+    color: rgba(26,26,26,0.4);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  #replayLink:hover{ color: #8B2E2E; }
+
+  /* ---------- 调参面板 ---------- */
+  #panel{
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 200;
+    width: 260px;
+    padding: 14px 16px 16px;
+    background: rgba(250,250,248,0.9);
+    border: 1px solid rgba(26,26,26,0.15);
+    border-radius: 6px;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 11px;
+    color: #1A1A1A;
+    backdrop-filter: blur(6px);
+    display: none;
+    pointer-events: auto;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  #panel.open{ display: block; }
+  #panel h3{ margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; }
+  #panel label{ display: block; margin-top: 9px; color: rgba(26,26,26,0.7); }
+  #panel .row{ display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #panel input[type="range"]{ width: 100%; margin-top: 3px; accent-color: #8B2E2E; }
+  #panel .val{ font-variant-numeric: tabular-nums; color: rgba(26,26,26,0.5); }
+
+  @media (prefers-reduced-motion: reduce){
+    .phrase-ch{ transition: opacity 1ms linear, filter 1ms linear; }
+    #veil{ display: none; }
+    #fireCursor{ display: none; }
+    #fxCanvas{ display: none; }
+    #eyelidTop, #eyelidBottom{ transition: none !important; }
+    #skipLink{ transition: none; }
+    #heartWrap{ transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <div id="actOne">
+    <div id="scene">
+      <div id="stageWarmth"></div>
+      <div id="textureLayer">
+        <div id="textureBase"></div>
+        <div id="textureReal"></div>
+      </div>
+
+      <div id="heartStage">
+        <div id="heartWrap">
+          <img id="healedImg" src="heart-healed.png" alt="" draggable="false">
+          <canvas id="corruptCanvas" width="1024" height="1536"></canvas>
+          <!-- 心跳搏动层：同内容复制 + 椭圆遮罩只露心脏，独立缩放，外围静止 -->
+          <div id="beatLayer">
+            <img id="healedImgBeat" src="heart-healed.png" alt="" draggable="false">
+            <canvas id="corruptCanvasBeat" width="1024" height="1536"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div id="phraseLayer"></div>
+    </div>
+
+    <div id="veil"></div>
+
+    <canvas id="fxCanvas"></canvas>
+
+    <div id="fireCursor">
+      <div id="flameGlow"></div>
+      <div id="flameOuter"></div>
+      <div id="flameCore"></div>
+    </div>
+
+    <div id="hint">移动火种，擦亮心脏</div>
+    <div id="returningHint">你已开过眼 · <a href="#" id="returningHintLink">直接进第二幕 →</a></div>
+    <div id="skipLink">跳过 →</div>
+  </div>
+
+  <div id="actTwo">
+    <div id="actTwoInner">
+      <a id="replayLink" href="#">← 重看第一幕</a>
+      <div id="actTwoTitle">第二幕 · 造物</div>
+      <div id="actTwoSub">（demo 占位：这里接项目手记流）</div>
+    </div>
+  </div>
+
+  <div id="eyelidTop"></div>
+  <div id="eyelidBottom"></div>
+
+</div>
+
+<img id="corruptedSrcImg" src="heart-corrupted.png" alt="" style="display:none;">
+
+<button type="button" id="panelToggle" aria-label="调参面板">⚙</button>
+
+<div id="panel">
+  <h3>调参面板 (d 隐藏)</h3>
+
+  <label>刷子半径 px
+    <div class="row"><input type="range" id="p-brushRadius" min="30" max="100" step="2"><span class="val" id="v-brushRadius"></span></div>
+  </label>
+  <label>火星密度
+    <div class="row"><input type="range" id="p-sparkDensity" min="0" max="3" step="0.1"><span class="val" id="v-sparkDensity"></span></div>
+  </label>
+  <label>灰烬数量
+    <div class="row"><input type="range" id="p-ashCount" min="80" max="150" step="5"><span class="val" id="v-ashCount"></span></div>
+  </label>
+  <label>静息 bpm
+    <div class="row"><input type="range" id="p-restBpm" min="30" max="70" step="1"><span class="val" id="v-restBpm"></span></div>
+  </label>
+  <label>暗纱强度
+    <div class="row"><input type="range" id="p-veilStrength" min="0" max="0.25" step="0.01"><span class="val" id="v-veilStrength"></span></div>
+  </label>
+  <label>底纹圈内 opacity
+    <div class="row"><input type="range" id="p-textureOpacity" min="0" max="0.4" step="0.01"><span class="val" id="v-textureOpacity"></span></div>
+  </label>
+  <label>治愈完成阈值 %
+    <div class="row"><input type="range" id="p-healThreshold" min="70" max="100" step="1"><span class="val" id="v-healThreshold"></span></div>
+  </label>
+  <label>视差强度
+    <div class="row"><input type="range" id="p-parallax" min="0" max="2" step="0.1"><span class="val" id="v-parallax"></span></div>
+  </label>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============================================================
+     PARAMS —— 所有魔法数字集中在此，调参面板直接读写这个对象
+     ============================================================ */
+  var PARAMS = {
+    brushRadius: 60,          // 刮擦刷子半径 (css px)
+    sparkDensity: 1,          // 火星密度倍率
+    ashCount: 110,            // 单次灰飞湮灭的灰烬片数
+    restBpm: 48,               // 静息心率
+    veilStrength: 0.08,       // 暗纱强度
+    textureOpacityMax: 0.18,  // 底纹圈内 opacity
+    healThresholdPct: 92,     // 全局治愈完成阈值 %
+    handThresholdPct: 60,     // 单手灰飞湮灭阈值 %
+    restBpmBonusPerHand: 6,
+    idleSampleMs: 500,
+    parallaxStrength: 1       // 三层视差强度倍率（0=关）
+  };
+
+  var parX = 0, parY = 0; // 视差平滑量
+
+  var REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ============================================================
+     DOM refs
+     ============================================================ */
+  var stage = document.getElementById('stage');
+  var actOneEl = document.getElementById('actOne');
+  var actTwoEl = document.getElementById('actTwo');
+  var textureBaseEl = document.getElementById('textureBase');
+  var textureRealEl = document.getElementById('textureReal');
+  var heartStageEl = document.getElementById('heartStage');
+  var heartWrapEl = document.getElementById('heartWrap');
+  var healedImgEl = document.getElementById('healedImg');
+  var corruptCanvas = document.getElementById('corruptCanvas');
+  var corruptedSrcImg = document.getElementById('corruptedSrcImg');
+  var phraseLayerEl = document.getElementById('phraseLayer');
+  var veilEl = document.getElementById('veil');
+  var fxCanvas = document.getElementById('fxCanvas');
+  var fireCursorEl = document.getElementById('fireCursor');
+  var flameOuterEl = document.getElementById('flameOuter');
+  var flameCoreEl = document.getElementById('flameCore');
+  var hintEl = document.getElementById('hint');
+  var returningHintEl = document.getElementById('returningHint');
+  var returningHintLink = document.getElementById('returningHintLink');
+  var skipLinkEl = document.getElementById('skipLink');
+  var replayLink = document.getElementById('replayLink');
+  var eyelidTop = document.getElementById('eyelidTop');
+  var eyelidBottom = document.getElementById('eyelidBottom');
+  var panel = document.getElementById('panel');
+  var panelToggleBtn = document.getElementById('panelToggle');
+
+  var root = document.documentElement;
+  var ctx = corruptCanvas.getContext('2d', { willReadFrequently: true });
+
+  /* 心跳搏动层 + 视差场景 */
+  var sceneEl = document.getElementById('scene');
+  var textureLayerEl = document.getElementById('textureLayer');
+  var beatLayerEl = document.getElementById('beatLayer');
+  var corruptCanvasBeat = document.getElementById('corruptCanvasBeat');
+  var beatCtx = corruptCanvasBeat.getContext('2d');
+  var beatDirty = true; // 基底 canvas 被擦过 → 下一帧同步搏动层副本
+  function syncBeatCanvas(){
+    beatCtx.clearRect(0, 0, corruptCanvasBeat.width, corruptCanvasBeat.height);
+    beatCtx.drawImage(corruptCanvas, 0, 0);
+    beatDirty = false;
+  }
+  function setBeatTransform(str, transition){
+    beatLayerEl.style.transition = transition === undefined ? '' : transition;
+    beatLayerEl.style.transform = str;
+  }
+  // reduced-motion 下心跳不跑、副本不同步 → 整层隐藏，静态场景只看基底
+  if (REDUCED_MOTION) beatLayerEl.style.display = 'none';
+
+  /* ============================================================
+     记忆底纹（与 v3 一致，调淡）
+     ============================================================ */
+  var MEMORY_PHRASES = [
+    "贩卖信息是贬值资产，贩卖视角是升值资产",
+    "框架是梯子，不是牢笼",
+    "没有一个好的钉子，就不要买无数把锤子",
+    "AI 时代最重要的是扎好马步",
+    "用复盘和记录对抗遗忘",
+    "人会消失，字不会",
+    "我缺的不是技能，是让独特性被看见的放大器",
+    "这不是我的简历，是我的思考操作系统",
+    "逻辑、思辨、提问、判断",
+    "营销、审美、决策判断，不可替代",
+    "2,338 篇笔记，308 层目录",
+    "一个月，抖音 0 → 2 万粉",
+    "建造者的证据",
+    "止损也是能力",
+    "长期资产，活着的数字自我"
+  ];
+
+  function boxesOverlap(a, b, gap){
+    return a.left < b.right + gap && a.right > b.left - gap &&
+           a.top < b.bottom + gap && a.bottom > b.top - gap;
+  }
+
+  function buildTexture(){
+    var w = window.innerWidth, h = window.innerHeight;
+    var GAP = 14;
+    var MAX_TRIES = 60;
+    var heartR = heartStageEl.getBoundingClientRect();
+    var heartZone = {
+      left: heartR.left - heartR.width*0.35,
+      top: heartR.top - heartR.height*0.15,
+      right: heartR.right + heartR.width*0.35,
+      bottom: heartR.bottom + heartR.height*0.15
+    };
+
+    textureBaseEl.innerHTML = '';
+    textureRealEl.innerHTML = '';
+
+    var placed = [];
+
+    for (var i=0;i<MEMORY_PHRASES.length;i++){
+      var text = MEMORY_PHRASES[i];
+      var size = 11 + Math.random()*3;
+      var rotDeg = Math.random()*4 - 2;
+
+      var base = document.createElement('div');
+      base.className = 'memory-phrase';
+      base.style.cssText = 'left:0;top:0;visibility:hidden;font-size:'+size.toFixed(1)+'px;';
+      base.textContent = text;
+      textureBaseEl.appendChild(base);
+      var mw = base.offsetWidth;
+      var mh = base.offsetHeight;
+
+      var rad = Math.abs(rotDeg) * Math.PI / 180;
+      var ebw = mw * Math.cos(rad) + mh * Math.sin(rad);
+      var ebh = mw * Math.sin(rad) + mh * Math.cos(rad);
+
+      var box = null;
+      for (var tries=0; tries<MAX_TRIES; tries++){
+        var left = 4 + Math.random() * Math.max(1, w - ebw - 8);
+        var top = 4 + Math.random() * Math.max(1, h - ebh - 8);
+        var cand = { left: left, top: top, right: left + ebw, bottom: top + ebh };
+        if (boxesOverlap(cand, heartZone, 0)) continue;
+        var collided = false;
+        for (var p=0; p<placed.length; p++){
+          if (boxesOverlap(cand, placed[p], GAP)){ collided = true; break; }
+        }
+        if (!collided){ box = cand; break; }
+      }
+      if (!box){
+        textureBaseEl.removeChild(base);
+        continue;
+      }
+
+      placed.push(box);
+
+      var elLeft = box.left + (ebw - mw) / 2;
+      var elTop = box.top + (ebh - mh) / 2;
+      var styleStr = 'left:'+elLeft.toFixed(1)+'px;top:'+elTop.toFixed(1)+'px;'+
+                      'transform:rotate('+rotDeg.toFixed(2)+'deg);font-size:'+size.toFixed(1)+'px;';
+
+      base.style.cssText = styleStr;
+
+      var real = document.createElement('div');
+      real.className = 'memory-phrase';
+      real.style.cssText = styleStr;
+      real.textContent = text;
+      textureRealEl.appendChild(real);
+    }
+  }
+
+  /* ============================================================
+     五手热区（归一化坐标，0..1 相对 1024×1536 素材图）
+     肉眼取自 heart-corrupted.png：五只手环绕心脏的构图
+     ============================================================ */
+  var HANDS = [
+    { id: 'greed',    label: '贪', cx: 0.29,  cy: 0.685, rx: 0.20, ry: 0.14 },  // 左下抓手
+    { id: 'wrath',    label: '嗔', cx: 0.685, cy: 0.685, rx: 0.19, ry: 0.14 },  // 右下攥拳
+    { id: 'delusion', label: '痴', cx: 0.40,  cy: 0.36,  rx: 0.19, ry: 0.15 },  // 左上蒙手
+    { id: 'pride',    label: '慢', cx: 0.53,  cy: 0.16,  rx: 0.15, ry: 0.14 },  // 正上按掌
+    { id: 'doubt',    label: '疑', cx: 0.79,  cy: 0.47,  rx: 0.18, ry: 0.15 }   // 右侧悬空手
+  ];
+
+  var IMG_W = 1024, IMG_H = 1536;
+  var GRID_W = 32, GRID_H = 48;
+  var sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = GRID_W; sampleCanvas.height = GRID_H;
+  var sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+  var origCanvas = document.createElement('canvas');
+  origCanvas.width = IMG_W; origCanvas.height = IMG_H;
+  var origCtx = origCanvas.getContext('2d', { willReadFrequently: true });
+
+  function buildHandCellMaps(){
+    HANDS.forEach(function(hand){
+      hand.cells = [];
+      for (var gy=0; gy<GRID_H; gy++){
+        for (var gx=0; gx<GRID_W; gx++){
+          var nx = (gx+0.5)/GRID_W, ny = (gy+0.5)/GRID_H;
+          var dx = (nx-hand.cx)/hand.rx, dy = (ny-hand.cy)/hand.ry;
+          if (dx*dx + dy*dy <= 1){
+            hand.cells.push(gy*GRID_W + gx);
+          }
+        }
+      }
+      hand.disintegrated = false;
+      hand.progress = 0;
+    });
+  }
+  buildHandCellMaps();
+
+  var disintegratedCount = 0;
+  var overallErasedFraction = 0;
+
+  /* ============================================================
+     刮刮卡治愈 —— canvas destination-out 软边刷擦除
+     ============================================================ */
+  function stampBrush(cx, cy, r){
+    beatDirty = true;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.65, 'rgba(0,0,0,0.95)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function eraseSegment(x0, y0, x1, y1, r){
+    var dist = Math.hypot(x1-x0, y1-y0);
+    var step = Math.max(4, r*0.25);
+    var n = Math.max(1, Math.ceil(dist/step));
+    for (var i=0; i<=n; i++){
+      var t = i/n;
+      stampBrush(x0+(x1-x0)*t, y0+(y1-y0)*t, r);
+    }
+  }
+
+  function handBBoxCanvas(hand){
+    var x0 = Math.max(0, Math.round((hand.cx-hand.rx)*IMG_W));
+    var y0 = Math.max(0, Math.round((hand.cy-hand.ry)*IMG_H));
+    var x1 = Math.min(IMG_W, Math.round((hand.cx+hand.rx)*IMG_W));
+    var y1 = Math.min(IMG_H, Math.round((hand.cy+hand.ry)*IMG_H));
+    return { x: x0, y: y0, w: Math.max(1, x1-x0), h: Math.max(1, y1-y0) };
+  }
+
+  function bigEraseHandRegion(hand){
+    var cx = hand.cx*IMG_W, cy = hand.cy*IMG_H;
+    var rPx = ((hand.rx*IMG_W) + (hand.ry*IMG_H)) / 2 * 1.3;
+    stampBrush(cx, cy, rPx);
+    var ring = 6;
+    for (var i=0;i<ring;i++){
+      var ang = i/ring*Math.PI*2;
+      stampBrush(cx+Math.cos(ang)*rPx*0.55, cy+Math.sin(ang)*rPx*0.7, rPx*0.75);
+    }
+  }
+
+  /* ============================================================
+     火星子 / 灰烬粒子
+     ============================================================ */
+  var fxCtx = fxCanvas.getContext('2d');
+  var sparks = [];
+  var ashParticles = [];
+
+  function resizeFxCanvas(){
+    fxCanvas.width = window.innerWidth;
+    fxCanvas.height = window.innerHeight;
+  }
+
+  function spawnSparks(x, y, vxBack, vyBack){
+    var n = 1 + Math.floor(Math.random()*3);
+    for (var i=0;i<n;i++){
+      if (sparks.length >= 20) break;
+      var spread = (Math.random()-0.5)*1.2;
+      var speed = 20 + Math.random()*40;
+      var ang = Math.atan2(vyBack, vxBack) + spread;
+      sparks.push({
+        x: x, y: y,
+        vx: Math.cos(ang)*speed*0.4,
+        vy: Math.sin(ang)*speed*0.4 - 18 - Math.random()*20,
+        size: 1.5 + Math.random()*1.5,
+        life: 400 + Math.random()*380,
+        maxLife: 0,
+        flick: Math.random()
+      });
+      sparks[sparks.length-1].maxLife = sparks[sparks.length-1].life;
+    }
+  }
+
+  function updateSparks(dtSec){
+    for (var i=sparks.length-1; i>=0; i--){
+      var s = sparks[i];
+      s.vx *= 0.94;
+      s.vy = s.vy*0.94 - 40*dtSec;
+      s.x += s.vx*dtSec;
+      s.y += s.vy*dtSec;
+      s.life -= dtSec*1000;
+      if (s.life <= 0){ sparks.splice(i,1); }
+    }
+  }
+
+  function triggerHandDisintegrate(hand){
+    if (hand.disintegrated) return;
+    hand.disintegrated = true;
+    disintegratedCount++;
+
+    var bbox = handBBoxCanvas(hand);
+    var imgData = null;
+    try{
+      imgData = origCtx.getImageData(bbox.x, bbox.y, bbox.w, bbox.h).data;
+    } catch(e){ imgData = null; }
+
+    var rect = corruptCanvas.getBoundingClientRect();
+    var k = rect.width > 0 ? rect.width / IMG_W : 0.5;
+    var handCenterView = {
+      x: rect.left + hand.cx*IMG_W*k,
+      y: rect.top + hand.cy*IMG_H*k
+    };
+
+    var windDx = handCenterView.x - fireX;
+    var windDy = handCenterView.y - fireY;
+    var windLen = Math.hypot(windDx, windDy) || 1;
+    windDx /= windLen; windDy /= windLen;
+
+    var count = Math.round(PARAMS.ashCount * (0.85 + Math.random()*0.3));
+    for (var i=0;i<count;i++){
+      var r=26,g=26,b=26;
+      if (imgData && imgData.length >= 4){
+        var pxCount = bbox.w*bbox.h;
+        var idx = Math.floor(Math.random()*pxCount)*4;
+        if (imgData[idx+3] > 10){
+          r = imgData[idx]; g = imgData[idx+1]; b = imgData[idx+2];
+        }
+      }
+      var spreadAngle = (Math.random()-0.5)*1.3;
+      var baseAngle = Math.atan2(windDy, windDx) + spreadAngle;
+      var speed = 30 + Math.random()*90;
+      var life = 550 + Math.random()*280;
+      ashParticles.push({
+        x: handCenterView.x + (Math.random()-0.5)*bbox.w*k*0.7,
+        y: handCenterView.y + (Math.random()-0.5)*bbox.h*k*0.7,
+        vx: Math.cos(baseAngle)*speed,
+        vy: Math.sin(baseAngle)*speed - 25 - Math.random()*35,
+        size: 2 + Math.random()*4,
+        rot: Math.random()*Math.PI*2,
+        rotSpeed: (Math.random()-0.5)*6,
+        life: life,
+        maxLife: life,
+        color: 'rgb('+r+','+g+','+b+')'
+      });
+    }
+
+    bigEraseHandRegion(hand);
+
+    if (!REDUCED_MOTION){
+      pulseHeartbeatBump();
+    }
+  }
+
+  function updateAsh(dtSec){
+    for (var i=ashParticles.length-1; i>=0; i--){
+      var a = ashParticles[i];
+      a.vx *= 0.97;
+      a.vy = a.vy*0.97 - 15*dtSec;
+      a.vx += (Math.random()-0.5)*8*dtSec;
+      a.vy += (Math.random()-0.5)*8*dtSec;
+      a.x += a.vx*dtSec;
+      a.y += a.vy*dtSec;
+      a.rot += a.rotSpeed*dtSec;
+      a.life -= dtSec*1000;
+      if (a.life <= 0){ ashParticles.splice(i,1); }
+    }
+  }
+
+  function renderFx(){
+    fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
+
+    for (var i=0;i<sparks.length;i++){
+      var s = sparks[i];
+      var lifeFrac = Math.max(0, s.life/s.maxLife);
+      var flicker = 0.6 + 0.4*Math.sin((performance.now()/60) + s.flick*10);
+      fxCtx.globalAlpha = Math.max(0, lifeFrac*flicker);
+      var mix = lifeFrac;
+      fxCtx.fillStyle = mix > 0.5 ? '#E8C97D' : '#8B2E2E';
+      fxCtx.beginPath();
+      fxCtx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+      fxCtx.fill();
+    }
+
+    for (var j=0;j<ashParticles.length;j++){
+      var a = ashParticles[j];
+      var lifeFrac = Math.max(0, a.life/a.maxLife);
+      fxCtx.save();
+      fxCtx.globalAlpha = lifeFrac;
+      fxCtx.translate(a.x, a.y);
+      fxCtx.rotate(a.rot);
+      var sz = a.size * (0.4 + lifeFrac*0.6);
+      fxCtx.fillStyle = a.color;
+      fxCtx.fillRect(-sz/2, -sz/2, sz, sz);
+      fxCtx.restore();
+    }
+    fxCtx.globalAlpha = 1;
+  }
+
+  /* ============================================================
+     悬浮句云：左右两列微弧排布 + 独立上下漂浮
+     ============================================================ */
+  var CHAIN_PHRASE = "人不能活一辈子最后只有两个字严父或者慈母";
+  var PHRASE_OLD = CHAIN_PHRASE.split('');
+  var PHRASE_NEW = "你想要怎样活这一生？".split('');
+
+  var phraseSpans = []; // { el, col: 'L'|'R', idx, baseX, baseY, phase, amp, speed }
+
+  function buildPhraseCloud(){
+    phraseLayerEl.innerHTML = '';
+    phraseSpans = [];
+    for (var i=0;i<PHRASE_OLD.length;i++){
+      var span = document.createElement('span');
+      span.className = 'phrase-ch';
+      span.textContent = PHRASE_OLD[i];
+      phraseLayerEl.appendChild(span);
+      phraseSpans.push({
+        el: span, idx: i,
+        baseX: 0, baseY: 0,
+        phase: Math.random()*Math.PI*2,
+        amp: 6 + Math.random()*4,
+        speed: 0.0012 + Math.random()*0.0009
+      });
+    }
+  }
+
+  /* 一条被风吹弯的弧线横在画里：起于左侧白羽外沿，掠过心脏下方羊皮纸，收在右中。
+     读序从左到右；对可见字重新求 t，morph 后 10 字沿同一条弧自动重排。 */
+  function layoutPhraseCloud(){
+    var r = heartStageEl.getBoundingClientRect();
+    var vw = window.innerWidth;
+    var narrow = vw < 600;
+    var visible = phraseSpans.filter(function(p){ return !p.el.classList.contains('gone'); });
+    var n = Math.max(2, visible.length);
+    var xStart = r.left - r.width*(narrow ? 0.04 : 0.17);
+    var xEnd   = r.right + r.width*(narrow ? 0.04 : 0.17);
+    var yBase  = narrow ? 0.63 : 0.60;
+    var yDip   = narrow ? 0.15 : 0.17;
+
+    visible.forEach(function(p, k){
+      var t = k/(n-1);
+      var x = xStart + t*(xEnd - xStart);
+      var y = r.top + r.height*(yBase + yDip*Math.sin(t*Math.PI));
+      x = Math.max(10, Math.min(vw - 26, x));
+      // 字沿弧线切线旋转（像写在曲线上），倾斜的相邻字读作笔势而非错乱
+      var slope = yDip*Math.PI*Math.cos(t*Math.PI) * r.height / (xEnd - xStart);
+      var rot = Math.atan(slope) * 180/Math.PI;
+      p.rot = Math.max(-18, Math.min(18, rot));
+      p.baseX = x; p.baseY = y;
+      p.el.style.left = x.toFixed(1) + 'px';
+      p.el.style.top = y.toFixed(1) + 'px';
+    });
+  }
+
+  function updatePhraseFloat(ts){
+    for (var i=0;i<phraseSpans.length;i++){
+      var p = phraseSpans[i];
+      if (p.el.classList.contains('gone')) continue;
+      var off = Math.sin(ts*p.speed + p.phase) * p.amp;
+      p.el.style.transform = 'translateY(' + off.toFixed(1) + 'px) rotate(' + (p.rot || 0).toFixed(1) + 'deg)';
+    }
+  }
+
+  var morphed = false;
+  function morphPhrase(){
+    if (morphed) return;
+    morphed = true;
+
+    // 1. 20 字逐个 blur+淡出（保留左右各前 5 位用于承接新句，其余直接隐去）
+    phraseSpans.forEach(function(p, i){
+      setTimeout(function(){
+        p.el.classList.add('fading');
+      }, i*45);
+    });
+
+    var fadeOutMs = phraseSpans.length*45 + 460;
+
+    setTimeout(function(){
+      // 前 10 个字位承接新句，其余彻底隐去；新句沿同一条弧线重排
+      phraseSpans.forEach(function(p){
+        if (p.idx >= PHRASE_NEW.length){
+          p.el.classList.add('gone');
+        }
+      });
+      layoutPhraseCloud();
+
+      for (var i=0;i<PHRASE_NEW.length && i<phraseSpans.length;i++){
+        (function(p, newIdx){
+          setTimeout(function(){
+            p.el.textContent = PHRASE_NEW[newIdx] || '';
+            p.el.classList.remove('fading');
+            p.el.classList.remove('gone');
+            // 强制回流，确保 blur 淡入而非跳变
+            void p.el.offsetWidth;
+          }, newIdx*70);
+        })(phraseSpans[i], i);
+      }
+    }, fadeOutMs);
+  }
+
+  function resetPhraseCloud(){
+    morphed = false;
+    phraseSpans.forEach(function(p, i){
+      p.el.textContent = PHRASE_OLD[i];
+      p.el.classList.remove('fading');
+      p.el.classList.remove('gone');
+    });
+  }
+
+  /* ============================================================
+     心跳（沿用 v3 的 lub-dub 曲线）
+     ============================================================ */
+  function easeOut(t){ return 1 - Math.pow(1-t, 3); }
+
+  function heartScaleAt(phase, amp){
+    var mainAmp = 0.045 * amp;
+    var secAmp = 0.022 * amp;
+    if (phase < 120){
+      var p = phase/120;
+      return 1 + mainAmp * easeOut(p);
+    } else if (phase < 400){
+      var p2 = (phase-120)/280;
+      return 1 + mainAmp - mainAmp * easeOut(p2);
+    } else if (phase < 460){
+      return 1;
+    } else if (phase < 520){
+      var p3 = (phase-460)/60;
+      return 1 + secAmp * easeOut(p3);
+    } else if (phase < 660){
+      var p4 = (phase-520)/140;
+      return 1 + secAmp - secAmp * easeOut(p4);
+    }
+    return 1;
+  }
+
+  var beatTime = 0;
+  var lastTs = null;
+  var pauseBeatUntil = 0;
+  var bpmSmoothed = PARAMS.restBpm;
+  var restBpmBonus = 0;
+  var finaleFired = false;
+  var actOneFinished = false;
+  var blinkInProgress = false;
+  var userHasMoved = false;
+
+  function pulseHeartbeatBump(){
+    restBpmBonus = Math.min(PARAMS.restBpmBonusPerHand*5, restBpmBonus + PARAMS.restBpmBonusPerHand);
+  }
+
+  function setHeartWrapTransform(str, transition){
+    heartWrapEl.style.transition = transition === undefined ? '' : transition;
+    heartWrapEl.style.transform = str;
+  }
+
+  /* ============================================================
+     终幕：五手全灭 + 擦除达阈值 → 自动补完 + 大搏 + 振翅 + morph + 眨眼
+     ============================================================ */
+  function onFullyHealed(){
+    if (finaleFired) return;
+    finaleFired = true;
+
+    if (REDUCED_MOTION){
+      corruptCanvas.style.display = 'none';
+      resetPhraseCloud();
+      phraseSpans.forEach(function(p){
+        if (p.idx < PHRASE_NEW.length){
+          p.el.textContent = PHRASE_NEW[p.idx] || '';
+        } else {
+          p.el.classList.add('gone');
+        }
+      });
+      layoutPhraseCloud();
+      actOneFinished = true;
+      return;
+    }
+
+    // 1. 自动补完：canvas（含搏动层副本）淡出显露完整治愈态
+    corruptCanvas.style.transition = 'opacity 700ms cubic-bezier(0.22,1,0.36,1)';
+    corruptCanvasBeat.style.transition = 'opacity 700ms cubic-bezier(0.22,1,0.36,1)';
+    requestAnimationFrame(function(){
+      corruptCanvas.style.opacity = '0';
+      corruptCanvasBeat.style.opacity = '0';
+    });
+    setTimeout(function(){
+      corruptCanvas.style.display = 'none';
+      corruptCanvasBeat.style.display = 'none';
+    }, 720);
+
+    // 2. 心脏大搏 + 振翅一拍
+    pauseBeatUntil = Infinity;
+    setHeartWrapTransform('scale(1.09) scaleX(1.03) translateY(-10px)', '600ms cubic-bezier(0.22,1,0.36,1)');
+    setTimeout(function(){
+      setHeartWrapTransform('scale(1) scaleX(1) translateY(0)', '600ms cubic-bezier(0.22,1,0.36,1)');
+      setTimeout(function(){
+        setHeartWrapTransform('scale(1)');
+        beatTime = 0;
+        pauseBeatUntil = 0;
+      }, 620);
+    }, 620);
+
+    // 3. 悬浮句逐字变形
+    setTimeout(function(){ morphPhrase(); }, 700);
+
+    // 4. morph 完成后停顿 1.2s → 眨眼进第二幕
+    var morphMs = PHRASE_OLD.length*45 + 460 + 5*70 + 500;
+    setTimeout(function(){
+      if (actOneFinished) return;
+      actOneFinished = true;
+      runBlink(true, null);
+    }, 700 + morphMs + 1200);
+  }
+
+  /* ============================================================
+     低采样网格进度统计（32×48，每 500ms 一次，不逐像素）
+     ============================================================ */
+  var lastSampleTs = 0;
+
+  function sampleProgress(){
+    sampleCtx.clearRect(0,0,GRID_W,GRID_H);
+    sampleCtx.drawImage(corruptCanvas, 0, 0, IMG_W, IMG_H, 0, 0, GRID_W, GRID_H);
+    var data;
+    try{
+      data = sampleCtx.getImageData(0,0,GRID_W,GRID_H).data;
+    } catch(e){ return; }
+
+    var totalCells = GRID_W*GRID_H;
+    var erasedTotal = 0;
+    for (var c=0;c<totalCells;c++){
+      if (data[c*4+3] < 128) erasedTotal++;
+    }
+    overallErasedFraction = erasedTotal / totalCells;
+
+    HANDS.forEach(function(hand){
+      if (hand.disintegrated) return;
+      var erased = 0;
+      for (var i=0;i<hand.cells.length;i++){
+        var cellIdx = hand.cells[i];
+        if (data[cellIdx*4+3] < 128) erased++;
+      }
+      hand.progress = hand.cells.length ? erased/hand.cells.length : 0;
+      if (hand.progress >= PARAMS.handThresholdPct/100){
+        triggerHandDisintegrate(hand);
+      }
+    });
+
+    if (!finaleFired && disintegratedCount === HANDS.length && overallErasedFraction >= PARAMS.healThresholdPct/100){
+      onFullyHealed();
+    }
+  }
+
+  /* ============================================================
+     指针 / 触摸 —— 移动即擦除，静止不产生任何刮擦
+     ============================================================ */
+  var pointerX = window.innerWidth * 0.5;
+  var pointerY = window.innerHeight * 0.42;
+  var fireX = pointerX, fireY = pointerY;
+  var lastErase = null;
+
+  function onPointerMove(x, y, isNewStroke){
+    pointerX = x; pointerY = y; userHasMoved = true;
+    if (REDUCED_MOTION || finaleFired) return;
+
+    var rect = corruptCanvas.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    var k = IMG_W / rect.width;
+    var cx = (x - rect.left) * k;
+    var cy = (y - rect.top) * k;
+    var rPx = PARAMS.brushRadius * k;
+
+    if (isNewStroke || lastErase == null){
+      stampBrush(cx, cy, rPx);
+    } else {
+      eraseSegment(lastErase.x, lastErase.y, cx, cy, rPx);
+    }
+    lastErase = { x: cx, y: cy };
+  }
+
+  window.addEventListener('mousemove', function(e){ onPointerMove(e.clientX, e.clientY, false); }, { passive: true });
+  window.addEventListener('touchstart', function(e){
+    if (e.touches && e.touches.length){
+      lastErase = null;
+      onPointerMove(e.touches[0].clientX, e.touches[0].clientY, true);
+    }
+  }, { passive: true });
+  window.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length) onPointerMove(e.touches[0].clientX, e.touches[0].clientY, false);
+  }, { passive: true });
+
+  /* ============================================================
+     火种物理：倾倒 + 拉长 + 急停晃两下 + 噪声闪烁
+     ============================================================ */
+  var prevFireX = pointerX, prevFireY = pointerY;
+  var smVX = 0, smVY = 0;
+  var prevSmSpeed = 0;
+  var wobbleActive = false, wobbleStart = 0;
+  var flickerCurrent = 1, flickerTarget = 1, flickerNextAt = 0;
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  function updateFireCursor(ts, dt){
+    fireX = clamp(pointerX, 12, window.innerWidth-12);
+    fireY = clamp(pointerY, 12, window.innerHeight-12);
+
+    var rawVX = fireX - prevFireX;
+    var rawVY = fireY - prevFireY;
+    prevFireX = fireX; prevFireY = fireY;
+
+    smVX += (rawVX - smVX) * 0.35;
+    smVY += (rawVY - smVY) * 0.35;
+    var smSpeed = Math.hypot(smVX, smVY);
+
+    if (prevSmSpeed > 6 && smSpeed < 2 && !wobbleActive){
+      wobbleActive = true; wobbleStart = ts;
+    }
+    prevSmSpeed = smSpeed;
+
+    var leanDeg = clamp(-smVX*3.0 - smVY*0.6, -42, 42);
+    var skewDeg = clamp(smVY*1.4, -14, 14);
+    var stretch = 1 + Math.min(0.5, smSpeed*0.03);
+
+    if (wobbleActive){
+      var wt = ts - wobbleStart;
+      if (wt > 500){
+        wobbleActive = false;
+      } else {
+        leanDeg += Math.sin(wt/40) * 9 * Math.exp(-wt/180);
+      }
+    }
+
+    if (ts > flickerNextAt){
+      flickerTarget = 0.82 + Math.random()*0.36;
+      flickerNextAt = ts + 70 + Math.random()*160;
+    }
+    flickerCurrent += (flickerTarget - flickerCurrent) * 0.3;
+
+    fireCursorEl.style.transform = 'translate3d(' + fireX.toFixed(1) + 'px,' + fireY.toFixed(1) + 'px,0)';
+    var leanStr = 'rotate(' + leanDeg.toFixed(1) + 'deg) skewX(' + skewDeg.toFixed(1) + 'deg) scaleY(' +
+      (stretch * (0.92 + flickerCurrent*0.16)).toFixed(3) + ') scaleX(' + (0.9 + (1-flickerCurrent)*0.28).toFixed(3) + ')';
+    flameOuterEl.style.transform = leanStr;
+    flameOuterEl.style.opacity = clamp(0.68 + flickerCurrent*0.3, 0, 1).toFixed(3);
+    flameCoreEl.style.transform = leanStr + ' scale(0.9)';
+    flameCoreEl.style.opacity = clamp(0.75 + flickerCurrent*0.24, 0, 1).toFixed(3);
+
+    root.style.setProperty('--mx', fireX.toFixed(1) + 'px');
+    root.style.setProperty('--my', fireY.toFixed(1) + 'px');
+
+    if (smSpeed > 1.2){
+      spawnSparks(fireX, fireY, -smVX, -smVY);
+    }
+  }
+
+  /* ============================================================
+     眨眼转场 + 幕间切换（与 v3 一致）
+     ============================================================ */
+  function swapActs(showActTwo){
+    if (showActTwo){
+      actOneEl.style.display = 'none';
+      actTwoEl.style.display = 'block';
+    } else {
+      actTwoEl.style.display = 'none';
+      actOneEl.style.display = 'block';
+    }
+  }
+
+  function setEyelids(closed, durationMs, timingFn, cb){
+    eyelidTop.style.transition = 'transform ' + durationMs + 'ms ' + timingFn;
+    eyelidBottom.style.transition = 'transform ' + durationMs + 'ms ' + timingFn;
+    requestAnimationFrame(function(){
+      eyelidTop.style.transform = closed ? 'translateY(0)' : 'translateY(calc(-100% - 32px))';
+      eyelidBottom.style.transform = closed ? 'translateY(0)' : 'translateY(calc(100% + 32px))';
+    });
+    if (cb) setTimeout(cb, durationMs);
+  }
+
+  var EYELID_TOP_VH = 0.78;
+  var EYELID_BOTTOM_VH = 0.34;
+
+  function buildEyelidPaths(){
+    var w = window.innerWidth;
+    var hTop = window.innerHeight * EYELID_TOP_VH;
+    var hBottom = window.innerHeight * EYELID_BOTTOM_VH;
+    var overlapPx = Math.max(0, hTop + hBottom - window.innerHeight);
+    var droopTop = overlapPx * 0.62;
+    var bulgeBottom = overlapPx * 0.28;
+
+    var topPath = 'M0,0 L0,' + hTop.toFixed(1) +
+      ' Q' + (w/2).toFixed(1) + ',' + (hTop - 2*droopTop).toFixed(1) + ' ' + w.toFixed(1) + ',' + hTop.toFixed(1) +
+      ' L' + w.toFixed(1) + ',0 Z';
+    var bottomPath = 'M0,' + hBottom.toFixed(1) + ' L0,0' +
+      ' Q' + (w/2).toFixed(1) + ',' + (2*bulgeBottom).toFixed(1) + ' ' + w.toFixed(1) + ',0' +
+      ' L' + w.toFixed(1) + ',' + hBottom.toFixed(1) + ' Z';
+
+    eyelidTop.style.clipPath = 'path("' + topPath + '")';
+    eyelidBottom.style.clipPath = 'path("' + bottomPath + '")';
+  }
+
+  var blinkGen = 0;
+
+  function runBlink(targetIsActTwo, extraWork){
+    if (REDUCED_MOTION){
+      if (extraWork) extraWork();
+      swapActs(targetIsActTwo);
+      if (targetIsActTwo) localStorage.setItem('kaiyan_v4_done', '1');
+      return;
+    }
+    if (blinkInProgress) return;
+    blinkInProgress = true;
+    var gen = ++blinkGen;
+    setEyelids(true, 200, 'ease-in', function(){
+      setTimeout(function(){
+        if (gen !== blinkGen) return;
+        if (extraWork) extraWork();
+        swapActs(targetIsActTwo);
+        if (targetIsActTwo) localStorage.setItem('kaiyan_v4_done', '1');
+        setEyelids(false, 450, 'ease-out', function(){ blinkInProgress = false; });
+      }, 180);
+    });
+  }
+
+  function redrawCorruptFull(){
+    ctx.clearRect(0,0,IMG_W,IMG_H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(corruptedSrcImg, 0, 0, IMG_W, IMG_H);
+  }
+
+  function resetToActOneState(){
+    actTwoEl.style.display = 'none';
+    actOneEl.style.display = 'block';
+
+    finaleFired = false;
+    actOneFinished = false;
+    disintegratedCount = 0;
+    restBpmBonus = 0;
+    overallErasedFraction = 0;
+    HANDS.forEach(function(h){ h.disintegrated = false; h.progress = 0; });
+    sparks = [];
+    ashParticles = [];
+    lastErase = null;
+
+    corruptCanvas.style.transition = '';
+    corruptCanvas.style.opacity = '1';
+    corruptCanvas.style.display = 'block';
+    corruptCanvasBeat.style.transition = '';
+    corruptCanvasBeat.style.opacity = '1';
+    corruptCanvasBeat.style.display = 'block';
+    redrawCorruptFull();
+    beatDirty = true;
+
+    setHeartWrapTransform('scale(1)');
+    setBeatTransform('scale(1)');
+    resetPhraseCloud();
+
+    beatTime = 0;
+    lastTs = null;
+    pauseBeatUntil = 0;
+    bpmSmoothed = PARAMS.restBpm;
+
+    buildTexture();
+    layoutPhraseCloud();
+    hintEl.classList.remove('hidden');
+    skipLinkEl.classList.remove('show');
+    initHintTimer();
+    initSkipTimer();
+    initReturningHint();
+    if (REDUCED_MOTION) initReducedMotionClick();
+  }
+
+  /* ============================================================
+     主循环
+     ============================================================ */
+  function mainFrame(ts){
+    if (lastTs == null) lastTs = ts;
+    var dt = ts - lastTs;
+    lastTs = ts;
+    if (dt > 80) dt = 80;
+    var dtSec = dt/1000;
+
+    updateFireCursor(ts, dt);
+    updateSparks(dtSec);
+    updateAsh(dtSec);
+    renderFx();
+    updatePhraseFloat(ts);
+
+    if (ts - lastSampleTs >= PARAMS.idleSampleMs){
+      lastSampleTs = ts;
+      if (!finaleFired) sampleProgress();
+    }
+
+    // 搏动层内容同步（有擦除才拷贝，一帧至多一次 drawImage）
+    if (beatDirty) syncBeatCanvas();
+
+    if (ts >= pauseBeatUntil){
+      beatTime += dt;
+      var targetBpm = PARAMS.restBpm + restBpmBonus + overallErasedFraction*10;
+      bpmSmoothed += (targetBpm - bpmSmoothed) * Math.min(1, dt * 0.006);
+      var Tc = 60000 / Math.max(1, bpmSmoothed);
+      var phase = beatTime % Tc;
+      var ampFactor = 1 + (disintegratedCount/HANDS.length) * 0.35;
+      // 心跳只作用于搏动层（椭圆遮罩内的心脏本体），外围翅膀/纸面静止
+      var s = 1 + (heartScaleAt(phase, ampFactor) - 1) * 0.62; // 压幅防遮罩边缘错缝
+      setBeatTransform('scale(' + Math.min(s, 1.025).toFixed(4) + ')');
+
+      if (!finaleFired){
+        var pulseNorm = Math.max(0, (s-1)) / (0.028 * ampFactor);
+        var warm = Math.min(0.9, overallErasedFraction*0.5 + pulseNorm*0.15);
+        var filterStr = 'brightness(' + (1 - warm*0.08 + pulseNorm*0.03).toFixed(3) + ')';
+        corruptCanvas.style.filter = filterStr;
+        corruptCanvasBeat.style.filter = filterStr;
+      }
+    }
+
+    // 三层深度视差：底纹(远)反向小移 / 画面(中)不动 / 悬浮句(近)同向大移
+    if (!REDUCED_MOTION){
+      var pk = PARAMS.parallaxStrength;
+      var tnx = (pointerX / window.innerWidth - 0.5) * 2;
+      var tny = (pointerY / window.innerHeight - 0.5) * 2;
+      parX += (tnx - parX) * Math.min(1, dt * 0.004);
+      parY += (tny - parY) * Math.min(1, dt * 0.004);
+      sceneEl.style.transform = 'rotateX(' + (-parY*2.2*pk).toFixed(3) + 'deg) rotateY(' + (parX*2.2*pk).toFixed(3) + 'deg)';
+      textureLayerEl.style.transform = 'translate(' + (-parX*8*pk).toFixed(1) + 'px,' + (-parY*8*pk).toFixed(1) + 'px)';
+      phraseLayerEl.style.transform = 'translate(' + (parX*14*pk).toFixed(1) + 'px,' + (parY*14*pk).toFixed(1) + 'px)';
+    }
+
+    requestAnimationFrame(mainFrame);
+  }
+
+  /* ============================================================
+     提示语 / 跳过 / 记忆
+     ============================================================ */
+  var hintTimer = null, skipTimer = null;
+  var HINT_FADE_DELAY = 8000;
+  var SKIP_DELAY_MS = 6000;
+
+  function initHintTimer(){
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function(){ hintEl.classList.add('hidden'); }, HINT_FADE_DELAY);
+  }
+
+  function initSkipTimer(){
+    clearTimeout(skipTimer);
+    skipTimer = setTimeout(function(){ skipLinkEl.classList.add('show'); }, SKIP_DELAY_MS);
+  }
+
+  function initReturningHint(){
+    returningHintEl.style.display = (localStorage.getItem('kaiyan_v4_done') === '1') ? 'block' : 'none';
+  }
+
+  skipLinkEl.addEventListener('click', function(){
+    if (actOneFinished) return;
+    actOneFinished = true;
+    runBlink(true, null);
+  });
+
+  returningHintLink.addEventListener('click', function(e){
+    e.preventDefault();
+    if (actOneFinished) return;
+    actOneFinished = true;
+    runBlink(true, null);
+  });
+
+  replayLink.addEventListener('click', function(e){
+    e.preventDefault();
+    if (blinkInProgress){
+      blinkGen++;
+      blinkInProgress = false;
+      resetToActOneState();
+      swapActs(false);
+      setEyelids(false, 300, 'ease-out', null);
+      return;
+    }
+    runBlink(false, resetToActOneState);
+  });
+
+  /* ============================================================
+     reduced-motion：点击心脏直接完成治愈到终态
+     ============================================================ */
+  function initReducedMotionClick(){
+    heartStageEl.classList.add('clickable');
+    heartStageEl.onclick = function(){
+      if (finaleFired) return;
+      HANDS.forEach(function(h){ h.disintegrated = true; });
+      disintegratedCount = HANDS.length;
+      overallErasedFraction = 1;
+      onFullyHealed();
+    };
+  }
+
+  /* ============================================================
+     调参面板
+     ============================================================ */
+  function initPanel(){
+    var map = [
+      { id: 'p-brushRadius', val: 'v-brushRadius', key: 'brushRadius', decimals: 0, onChange: function(v){ root.style.setProperty('--brush-radius', v+'px'); } },
+      { id: 'p-sparkDensity', val: 'v-sparkDensity', key: 'sparkDensity', decimals: 1 },
+      { id: 'p-ashCount', val: 'v-ashCount', key: 'ashCount', decimals: 0 },
+      { id: 'p-restBpm', val: 'v-restBpm', key: 'restBpm', decimals: 0 },
+      { id: 'p-veilStrength', val: 'v-veilStrength', key: 'veilStrength', decimals: 2, onChange: function(v){ root.style.setProperty('--veil-strength', v); } },
+      { id: 'p-textureOpacity', val: 'v-textureOpacity', key: 'textureOpacityMax', decimals: 2, onChange: function(v){ root.style.setProperty('--texture-real-opacity-max', v); } },
+      { id: 'p-healThreshold', val: 'v-healThreshold', key: 'healThresholdPct', decimals: 0 },
+      { id: 'p-parallax', val: 'v-parallax', key: 'parallaxStrength', decimals: 1 }
+    ];
+
+    map.forEach(function(m){
+      var input = document.getElementById(m.id);
+      var out = document.getElementById(m.val);
+      input.value = PARAMS[m.key];
+      out.textContent = Number(PARAMS[m.key]).toFixed(m.decimals);
+      input.addEventListener('input', function(){
+        var v = parseFloat(input.value);
+        PARAMS[m.key] = v;
+        out.textContent = v.toFixed(m.decimals);
+        if (m.onChange) m.onChange(v);
+      });
+    });
+
+    window.addEventListener('keydown', function(e){
+      if (e.key === 'd' || e.key === 'D'){
+        panel.classList.toggle('open');
+      }
+    });
+
+    panelToggleBtn.addEventListener('click', function(){
+      panel.classList.toggle('open');
+    });
+  }
+
+  /* ============================================================
+     resize
+     ============================================================ */
+  var resizeTimer = null;
+  function onResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      resizeFxCanvas();
+      buildTexture();
+      layoutPhraseCloud();
+      buildEyelidPaths();
+    }, 200);
+  }
+  window.addEventListener('resize', onResize);
+
+  /* ============================================================
+     调试钩子（供无头浏览器自测使用，不影响正常交互）
+     ============================================================ */
+  window.__v4Debug = {
+    getState: function(){
+      return {
+        overallErasedFraction: overallErasedFraction,
+        disintegratedCount: disintegratedCount,
+        hands: HANDS.map(function(h){ return { id: h.id, progress: h.progress, disintegrated: h.disintegrated }; }),
+        finaleFired: finaleFired,
+        actOneFinished: actOneFinished
+      };
+    },
+    forceHandDisintegrate: function(id){
+      var hand = HANDS.filter(function(h){ return h.id === id; })[0];
+      if (hand) triggerHandDisintegrate(hand);
+    },
+    forceSample: function(){ sampleProgress(); },
+    eraseAt: function(xFrac, yFrac, r){
+      stampBrush(xFrac*IMG_W, yFrac*IMG_H, r || PARAMS.brushRadius*2);
+    },
+    stressTest: function(strokes){
+      var t0 = performance.now();
+      var rect = corruptCanvas.getBoundingClientRect();
+      var k = IMG_W/rect.width;
+      for (var i=0;i<strokes;i++){
+        var x0 = Math.random()*IMG_W, y0 = Math.random()*IMG_H;
+        var x1 = x0 + (Math.random()-0.5)*200, y1 = y0 + (Math.random()-0.5)*200;
+        eraseSegment(x0,y0,x1,y1,PARAMS.brushRadius*k);
+      }
+      return performance.now() - t0;
+    }
+  };
+
+  /* ============================================================
+     init
+     ============================================================ */
+  function init(){
+    root.style.setProperty('--texture-base-opacity', 0.015);
+    root.style.setProperty('--texture-real-opacity-max', PARAMS.textureOpacityMax);
+    root.style.setProperty('--veil-strength', PARAMS.veilStrength);
+
+    if (window.innerWidth < 600){
+      PARAMS.brushRadius = Math.min(PARAMS.brushRadius, 42);
+      // 窄屏：心脏让出边距给两侧悬浮句列，否则字会挤出屏外
+      root.style.setProperty('--heart-w', 'min(72vw, 53vh)');
+      PHRASE_SIDE_OFFSET = 0.09;
+      PHRASE_BULGE = 0.025;
+    }
+    root.style.setProperty('--brush-radius', PARAMS.brushRadius + 'px');
+
+    resizeFxCanvas();
+    buildPhraseCloud();
+    buildTexture();
+    layoutPhraseCloud();
+    buildEyelidPaths();
+    initHintTimer();
+    initSkipTimer();
+    initReturningHint();
+    initPanel();
+
+    root.style.setProperty('--mx', pointerX.toFixed(1) + 'px');
+    root.style.setProperty('--my', pointerY.toFixed(1) + 'px');
+
+    function onCorruptedLoaded(){
+      origCtx.drawImage(corruptedSrcImg, 0, 0, IMG_W, IMG_H);
+      redrawCorruptFull();
+
+      if (REDUCED_MOTION){
+        corruptCanvas.style.filter = '';
+        corruptCanvasBeat.style.filter = '';
+        initReducedMotionClick();
+      } else {
+        requestAnimationFrame(mainFrame);
+      }
+    }
+
+    if (corruptedSrcImg.complete && corruptedSrcImg.naturalWidth > 0){
+      onCorruptedLoaded();
+    } else {
+      corruptedSrcImg.addEventListener('load', onCorruptedLoaded);
+    }
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

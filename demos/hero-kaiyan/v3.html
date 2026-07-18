@@ -1,0 +1,1819 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>开眼 v3 · demo</title>
+<style>
+  :root{
+    --mx: 50vw;
+    --my: 50vh;
+    --pool-radius: 150px;
+    --texture-base-opacity: 0.015;
+    --texture-real-opacity-max: 0.30;
+    --crack-opacity-max: 0.07;
+    --glow-base-opacity: 0.06;
+    --heart-vh: 48vh;
+    --vessel-base-opacity: 0.05;
+    --vessel-pool-opacity-max: 0.18;
+    --veil-strength: 0.07;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #FAFAF8;
+    color: #1A1A1A;
+    font-family: "Songti SC", "STSong", serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* #stage 用 position:fixed + inset:0 —— 严格锚定到真实视口边界，
+     不用 100vw/100vh（跨浏览器下 100vw 可能把纵向滚动条宽度算进去，
+     导致居中基准比实际可视区域宽，内容看起来整体偏左，这是 v2 居中
+     bug 的根因）。fixed 元素的 inset:0 直接取 viewport，不存在这个偏差。 */
+  #stage{
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  /* actOne / actTwo 都是纯 static 定位的容器（不设 position/transform/opacity），
+     这样它们的绝对定位子元素会穿透去找 #stage 当 containing block，
+     同时不会给 heartImg 的 mix-blend-mode 引入新的 stacking context 隔离层。 */
+  #actOne, #actTwo{ position: static; }
+
+  /* ---------- 1. 心脏位光晕 ---------- */
+  #glow{
+    position: absolute;
+    left: 50%;
+    top: 36vh;
+    width: min(140vw, 1600px);
+    height: min(140vw, 1600px);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle at 50% 50%,
+      #E8C97D 0%,
+      rgba(232,201,125,0.65) 18%,
+      #8B2E2E 42%,
+      rgba(139,46,46,0.0) 72%);
+    filter: blur(40px);
+    opacity: var(--glow-base-opacity);
+    pointer-events: none;
+    will-change: opacity, transform;
+    z-index: 1;
+  }
+
+  /* ---------- 2. 血管纹理层（vessels.png，心脏为中心） ---------- */
+  #vesselLayer{
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .vessel-img{
+    position: absolute;
+    left: 50%;
+    top: 36vh;
+    width: 130vmin;
+    height: auto;
+    transform: translate(-50%, -50%);
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+  #vesselsBase{ opacity: var(--vessel-base-opacity); }
+  #vesselsReal{
+    opacity: var(--vessel-pool-opacity-max);
+    -webkit-mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+  }
+  #vesselsReal.reveal-all{
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.22;
+    transition: opacity 800ms cubic-bezier(0.22,1,0.36,1);
+  }
+
+  /* ---------- 3. 记忆底纹 ---------- */
+  #textureLayer{
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+  #textureBase, #textureReal{
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  #textureBase{
+    opacity: var(--texture-base-opacity);
+  }
+  #textureReal{
+    opacity: var(--texture-real-opacity-max);
+    -webkit-mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+  }
+  #textureReal.reveal-all{
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.1;
+    transition: opacity 800ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .memory-phrase{
+    position: absolute;
+    white-space: nowrap;
+    color: #1A1A1A;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- 4. 冰裂纹 ---------- */
+  #crackSvg{
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .crack{
+    fill: none;
+    stroke: #1A1A1A;
+    stroke-width: 0.5;
+    opacity: 0;
+    transition: stroke-dashoffset 600ms cubic-bezier(0.22,1,0.36,1), opacity 600ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .crack.revealed{ opacity: var(--crack-opacity-max); }
+
+  /* ---------- 5. 文字锁链：3D 字牌层 + 链环层（各分前 / 后两层） ---------- */
+  #ringLayerBack, #ringLayerFront{
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+  #ringLayerBack{ z-index: 5; }
+  #ringLayerFront{ z-index: 7; }
+  #ringBackGroup{ opacity: 0.22; }
+  .chain-ring-shadow{
+    fill: #1A1A1A;
+    opacity: 0.15;
+    filter: blur(2.5px);
+  }
+  .chain-ring .chain-link{
+    fill: none;
+    stroke: url(#chainMetalGrad);
+    stroke-width: 2.6;
+    opacity: 0.78;
+  }
+  .chain-ring .chain-link.link-b{
+    stroke-width: 2.0;
+    opacity: 0.52;
+  }
+
+  #plateLayerBack, #plateLayerFront{
+    position: absolute;
+    inset: 0;
+    perspective: 900px;
+    pointer-events: none;
+  }
+  #plateLayerBack{ z-index: 5; opacity: 0.22; }
+  #plateLayerFront{ z-index: 7; opacity: 1; }
+
+  .chain-plate{
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 34px;
+    height: 34px;
+    margin-left: -17px;
+    margin-top: -17px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: #1A1A1A;
+    font-family: "Songti SC", "STSong", serif;
+    font-size: 30px;
+    font-weight: 500;
+    /* 裸字形挤出：9 层沿统一深度方向（右下 0.66:1）逐级偏移的 text-shadow，
+       模拟凸版印刷字的立体挤出感，不再依赖卡片底色。 */
+    text-shadow:
+      0.5px 0.76px 0 rgba(26,26,26,0.88),
+      1.0px 1.52px 0 rgba(26,26,26,0.80),
+      1.5px 2.28px 0 rgba(26,26,26,0.72),
+      2.0px 3.04px 0 rgba(26,26,26,0.63),
+      2.5px 3.80px 0 rgba(26,26,26,0.54),
+      3.0px 4.56px 0 rgba(26,26,26,0.45),
+      3.5px 5.32px 0 rgba(26,26,26,0.35),
+      4.0px 6.08px 0 rgba(26,26,26,0.25),
+      4.5px 6.84px 1px rgba(26,26,26,0.15);
+    backface-visibility: hidden;
+    will-change: transform;
+  }
+
+  /* ---------- 6. 心脏（heart-real.png，multiply + 径向羽化 mask） ----------
+     mix-blend-mode 会被任何"创建 stacking context 的祖先"隔离，所以图片
+     必须直接挂在 #actOne 下自己定位（#actOne 不带 transform/opacity/filter，
+     不会形成新的 stacking context）。背景是暖米白但并不均匀（四角
+     ~RGB 235-247，非纯白），单靠 brightness 提亮无法把渐变背景完全钳到
+     纯白，边角会残留一圈极淡的方形轮廓 —— 所以在 multiply 之外再叠一层
+     径向羽化 mask，把图片最外圈（约 72%→100% 半径）柔化虚化掉，
+     双保险抹掉方形边界。 */
+  #heartImg{
+    position: absolute;
+    left: 50%;
+    top: 36vh;
+    height: var(--heart-vh);
+    width: auto;
+    aspect-ratio: 1700 / 1880;
+    transform: translate(-50%, -50%) scale(1);
+    z-index: 6;
+    mix-blend-mode: multiply;
+    filter: brightness(1.1) saturate(1.05) contrast(1.02);
+    -webkit-mask-image: radial-gradient(ellipse 66% 64% at 50% 50%, #000 70%, transparent 100%);
+    mask-image: radial-gradient(ellipse 66% 64% at 50% 50%, #000 70%, transparent 100%);
+    pointer-events: none;
+    will-change: transform, filter;
+    -webkit-user-drag: none;
+  }
+  #heartImg.clickable{ pointer-events: auto; cursor: pointer; }
+
+  /* ---------- 7. 暗纱（全页面极淡暗化，光池内恢复原亮） ---------- */
+  #veil{
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    background: #14130F;
+    opacity: var(--veil-strength);
+    -webkit-mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), transparent 0%, transparent 58%, black 100%);
+    mask-image: radial-gradient(circle var(--pool-radius) at var(--mx) var(--my), transparent 0%, transparent 58%, black 100%);
+    pointer-events: none;
+  }
+  #veil.hidden{ opacity: 0 !important; }
+
+  /* ---------- 8. 俯视手电筒（跟随光标） ---------- */
+  #torchSvg{
+    position: absolute;
+    inset: 0;
+    z-index: 9;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .torch-shadow{ fill: #1A1A1A; opacity: 0.16; }
+  .torch-body{ fill: url(#torchBodyGrad); stroke: rgba(26,26,26,0.28); stroke-width: 0.6; }
+  .torch-tail{ fill: url(#torchTailGrad); stroke: rgba(26,26,26,0.32); stroke-width: 0.5; }
+  .torch-head{ fill: url(#torchHeadGrad); stroke: rgba(26,26,26,0.38); stroke-width: 0.6; }
+  .torch-lens{ fill: url(#torchLensGrad); stroke: rgba(232,201,125,0.55); stroke-width: 0.5; }
+  .torch-lens-hi{ fill: #FAFAF8; opacity: 0.55; }
+
+  /* ---------- 9. 终幕大字 ---------- */
+  #bigTextWrap{
+    position: absolute;
+    left: 50%;
+    top: 75vh;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    text-align: center;
+    pointer-events: none;
+  }
+  #bigText{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.18em;
+    font-size: clamp(44px, 9vw, 88px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: 0.04em;
+  }
+  .big-line{ white-space: nowrap; }
+  .finale-ch{
+    display: inline-block;
+    color: #1A1A1A;
+    opacity: 0;
+    filter: blur(4px);
+    transition: opacity 500ms cubic-bezier(0.22,1,0.36,1), filter 500ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .finale-ch.lit{ opacity: 1; filter: blur(0); }
+
+  /* ---------- 提示 / 跳过 ---------- */
+  #hint{
+    position: absolute;
+    top: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 11;
+    font-size: 13px;
+    color: rgba(26,26,26,0.34);
+    letter-spacing: 0.06em;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1200ms ease-out;
+  }
+  #hint.hidden{ opacity: 0; }
+
+  #returningHint{
+    position: absolute;
+    top: 20px;
+    left: 24px;
+    z-index: 11;
+    font-size: 12px;
+    color: rgba(26,26,26,0.4);
+    letter-spacing: 0.04em;
+    display: none;
+  }
+  #returningHint a{
+    color: rgba(139,46,46,0.72);
+    text-decoration: none;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  #returningHint a:hover{ color: #8B2E2E; }
+
+  #skipLink{
+    position: absolute;
+    right: 22px;
+    bottom: 20px;
+    z-index: 11;
+    font-size: 12px;
+    color: rgba(26,26,26,0.32);
+    letter-spacing: 0.04em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 900ms ease-out;
+    cursor: pointer;
+  }
+  #skipLink.show{ opacity: 1; pointer-events: auto; }
+  #skipLink:hover{ color: #8B2E2E; }
+
+  /* ---------- 心脏三档切换点 ---------- */
+  #heartSwitcher{
+    position: absolute;
+    left: 18px;
+    bottom: 20px;
+    z-index: 11;
+    display: flex;
+    gap: 10px;
+    pointer-events: auto;
+  }
+  .heart-dot{
+    width: 8px;
+    height: 8px;
+    padding: 6px;
+    margin: -6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .heart-dot::before{
+    content: '';
+    display: block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #1A1A1A;
+    opacity: 0.35;
+  }
+  .heart-dot.active::before{ opacity: 0.75; }
+
+  /* ---------- 摩擦挣脱：静止提示 ---------- */
+  #idleHint{
+    position: absolute;
+    z-index: 9;
+    transform: translate(-50%, 0);
+    font-size: 12px;
+    color: rgba(26,26,26,0.5);
+    letter-spacing: 0.04em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 400ms ease-out;
+    white-space: nowrap;
+  }
+  #idleHint.show{ opacity: 1; }
+
+  /* ---------- 面板开关（触屏） ---------- */
+  #panelToggle{
+    position: fixed;
+    right: 8px;
+    bottom: 8px;
+    z-index: 201;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: #1A1A1A;
+    opacity: 0.3;
+    font-size: 14px;
+    line-height: 24px;
+    text-align: center;
+    cursor: pointer;
+    pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #panelToggle:active{ opacity: 0.6; }
+
+  /* ---------- 眨眼转场（真人眨眼：上眼睑担 ~75% 行程，下眼睑担 ~25%） ---------- */
+  #eyelidTop, #eyelidBottom{
+    position: fixed;
+    left: 0;
+    width: 100%;
+    background: #1A1A1A;
+    z-index: 100;
+    pointer-events: none;
+  }
+  #eyelidTop{
+    top: 0;
+    height: 78vh;
+    /* 曲线由 JS 用 clip-path: path() 计算（border-radius 只能内切圆角，
+       没法做出“中点收起、两端下探”的真眼睑弧线，见 buildEyelidPaths） */
+    transform: translateY(calc(-100% - 32px));
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,0.25));
+  }
+  #eyelidBottom{
+    bottom: 0;
+    height: 34vh;
+    transform: translateY(calc(100% + 32px));
+    filter: drop-shadow(0 -8px 20px rgba(0,0,0,0.25));
+  }
+
+  /* ---------- 第二幕 ---------- */
+  #actTwo{
+    display: none;
+  }
+  #actTwoInner{
+    position: absolute;
+    inset: 0;
+    background: #FAFAF8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  #actTwoTitle{
+    font-size: clamp(32px, 6vw, 56px);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: #1A1A1A;
+  }
+  #actTwoSub{
+    margin-top: 18px;
+    font-size: 14px;
+    color: rgba(26,26,26,0.5);
+    letter-spacing: 0.04em;
+  }
+  #replayLink{
+    position: absolute;
+    top: 20px;
+    left: 24px;
+    font-size: 12px;
+    color: rgba(26,26,26,0.4);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  #replayLink:hover{ color: #8B2E2E; }
+
+  /* ---------- 调参面板 ---------- */
+  #panel{
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 200;
+    width: 260px;
+    padding: 14px 16px 16px;
+    background: rgba(250,250,248,0.9);
+    border: 1px solid rgba(26,26,26,0.15);
+    border-radius: 6px;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 11px;
+    color: #1A1A1A;
+    backdrop-filter: blur(6px);
+    display: none;
+    pointer-events: auto;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  #panel.open{ display: block; }
+  #panel h3{ margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; }
+  #panel label{ display: block; margin-top: 9px; color: rgba(26,26,26,0.7); }
+  #panel .row{ display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #panel input[type="range"]{ width: 100%; margin-top: 3px; accent-color: #8B2E2E; }
+  #panel .val{ font-variant-numeric: tabular-nums; color: rgba(26,26,26,0.5); }
+
+  @media (prefers-reduced-motion: reduce){
+    .finale-ch{ transition: opacity 1ms linear, filter 1ms linear; }
+    .crack{ transition: stroke-dashoffset 1ms linear, opacity 1ms linear; }
+    #glow{ transition: none !important; }
+    #textureReal, #vesselsReal{ transition: none; }
+    #textureReal.reveal-all, #vesselsReal.reveal-all{ transition: none; }
+    #heartImg{ transition: none !important; }
+    #veil{ display: none; }
+    #torchSvg{ display: none; }
+    .chain-plate{ transition: none !important; }
+    #eyelidTop, #eyelidBottom{ transition: none !important; }
+    #skipLink{ transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <div id="actOne">
+    <div id="glow"></div>
+
+    <div id="vesselLayer">
+      <img id="vesselsBase" class="vessel-img" src="vessels.png" alt="" draggable="false">
+      <img id="vesselsReal" class="vessel-img" src="vessels.png" alt="" draggable="false">
+    </div>
+
+    <div id="textureLayer">
+      <div id="textureBase"></div>
+      <div id="textureReal"></div>
+    </div>
+
+    <svg id="crackSvg"></svg>
+
+    <svg id="ringLayerBack" class="chain-svg"><g id="ringBackGroup"></g></svg>
+    <div id="plateLayerBack"></div>
+
+    <img id="heartImg" src="heart-a.png" width="1700" height="1880" alt="" draggable="false">
+
+    <svg id="ringLayerFront" class="chain-svg">
+      <defs>
+        <linearGradient id="chainMetalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#8B8060"></stop>
+          <stop offset="50%" stop-color="#4A463F"></stop>
+          <stop offset="100%" stop-color="#2A2822"></stop>
+        </linearGradient>
+      </defs>
+      <g id="ringFrontGroup"></g>
+    </svg>
+    <div id="plateLayerFront"></div>
+
+    <div id="veil"></div>
+
+    <svg id="torchSvg">
+      <defs>
+        <linearGradient id="torchBodyGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#FAFAF8" stop-opacity="0.92"></stop>
+          <stop offset="40%" stop-color="#FAFAF8" stop-opacity="0.55"></stop>
+          <stop offset="68%" stop-color="#1A1A1A" stop-opacity="0.42"></stop>
+          <stop offset="100%" stop-color="#1A1A1A" stop-opacity="0.80"></stop>
+        </linearGradient>
+        <linearGradient id="torchTailGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#FAFAF8" stop-opacity="0.9"></stop>
+          <stop offset="55%" stop-color="#FAFAF8" stop-opacity="0.38"></stop>
+          <stop offset="100%" stop-color="#1A1A1A" stop-opacity="0.72"></stop>
+        </linearGradient>
+        <radialGradient id="torchHeadGrad" cx="38%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="#FAFAF8" stop-opacity="0.95"></stop>
+          <stop offset="50%" stop-color="#8B2E2E" stop-opacity="0.28"></stop>
+          <stop offset="100%" stop-color="#1A1A1A" stop-opacity="0.85"></stop>
+        </radialGradient>
+        <radialGradient id="torchLensGrad" cx="40%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="#FAFAF8" stop-opacity="0.95"></stop>
+          <stop offset="30%" stop-color="#E8C97D" stop-opacity="0.95"></stop>
+          <stop offset="100%" stop-color="#E8C97D" stop-opacity="0.28"></stop>
+        </radialGradient>
+        <filter id="torchSoftBlur" x="-150%" y="-150%" width="400%" height="400%">
+          <feGaussianBlur stdDeviation="2.2"></feGaussianBlur>
+        </filter>
+      </defs>
+      <g id="torchGroup">
+        <ellipse class="torch-shadow" cx="1.5" cy="23.5" rx="10" ry="3.4" filter="url(#torchSoftBlur)"></ellipse>
+        <rect class="torch-body" x="-7" y="-25" width="14" height="32" rx="6"></rect>
+        <ellipse class="torch-tail" cx="0" cy="-25" rx="7" ry="2.3"></ellipse>
+        <ellipse class="torch-head" cx="0" cy="13" rx="10.5" ry="6.4"></ellipse>
+        <ellipse class="torch-lens" cx="0" cy="15.4" rx="8" ry="4.6"></ellipse>
+        <ellipse class="torch-lens-hi" cx="-2.4" cy="13.9" rx="2.3" ry="1.2"></ellipse>
+      </g>
+    </svg>
+
+    <div id="bigTextWrap">
+      <div id="bigText"></div>
+    </div>
+
+    <div id="hint">移动光，找到心脏</div>
+    <div id="returningHint">你已开过眼 · <a href="#" id="returningHintLink">直接进第二幕 →</a></div>
+    <div id="skipLink">跳过 →</div>
+    <div id="idleHint">动一动光</div>
+
+    <div id="heartSwitcher">
+      <button type="button" class="heart-dot active" data-src="heart-a.png" aria-label="心脏样式 a"></button>
+      <button type="button" class="heart-dot" data-src="heart-b.png" aria-label="心脏样式 b"></button>
+      <button type="button" class="heart-dot" data-src="heart-real.png" aria-label="心脏样式 c"></button>
+    </div>
+  </div>
+
+  <div id="actTwo">
+    <div id="actTwoInner">
+      <a id="replayLink" href="#">← 重看第一幕</a>
+      <div id="actTwoTitle">第二幕 · 造物</div>
+      <div id="actTwoSub">（demo 占位：这里接项目手记流）</div>
+    </div>
+  </div>
+
+  <div id="eyelidTop"></div>
+  <div id="eyelidBottom"></div>
+
+</div>
+
+<button type="button" id="panelToggle" aria-label="调参面板">⚙</button>
+
+<div id="panel">
+  <h3>调参面板 (d 隐藏)</h3>
+
+  <label>心脏尺寸 vh
+    <div class="row"><input type="range" id="p-heartSize" min="30" max="64" step="1"><span class="val" id="v-heartSize"></span></div>
+  </label>
+  <label>静息 bpm
+    <div class="row"><input type="range" id="p-restBpm" min="30" max="70" step="1"><span class="val" id="v-restBpm"></span></div>
+  </label>
+  <label>充能 bpm 上限
+    <div class="row"><input type="range" id="p-chargeBpmMax" min="60" max="110" step="1"><span class="val" id="v-chargeBpmMax"></span></div>
+  </label>
+  <label>断字间隔 秒
+    <div class="row"><input type="range" id="p-breakInterval" min="0.2" max="1.5" step="0.05"><span class="val" id="v-breakInterval"></span></div>
+  </label>
+  <label>光池半径 px
+    <div class="row"><input type="range" id="p-poolRadius" min="80" max="260" step="5"><span class="val" id="v-poolRadius"></span></div>
+  </label>
+  <label>暗纱强度
+    <div class="row"><input type="range" id="p-veilStrength" min="0" max="0.25" step="0.01"><span class="val" id="v-veilStrength"></span></div>
+  </label>
+  <label>血管基线 opacity
+    <div class="row"><input type="range" id="p-vesselBase" min="0" max="0.15" step="0.005"><span class="val" id="v-vesselBase"></span></div>
+  </label>
+  <label>血管光池内 opacity
+    <div class="row"><input type="range" id="p-vesselPool" min="0" max="0.5" step="0.01"><span class="val" id="v-vesselPool"></span></div>
+  </label>
+  <label>链带倾角 °
+    <div class="row"><input type="range" id="p-chainTilt" min="0" max="40" step="1"><span class="val" id="v-chainTilt"></span></div>
+  </label>
+  <label>位移阈值 px
+    <div class="row"><input type="range" id="p-frictionThreshold" min="0" max="20" step="0.5"><span class="val" id="v-frictionThreshold"></span></div>
+  </label>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /* ============================================================
+     PARAMS —— 所有魔法数字集中在此，调参面板直接读写这个对象
+     ============================================================ */
+  var PARAMS = {
+    heartSize: 48,               // 心脏高度 vh
+    restBpm: 50,                 // 静息心率
+    chargeBpmMax: 80,            // 充能心率上限
+    breakIntervalSec: 0.6,       // 断字间隔（秒）
+    poolRadius: 150,             // 光池半径 px
+    veilStrength: 0.07,          // 暗纱强度
+    vesselBaseOpacity: 0.05,     // 血管基线 opacity
+    vesselPoolOpacityMax: 0.18,  // 血管光池内 opacity
+    chainTiltDeg: 20,            // 链带倾角
+
+    textureBaseOpacity: 0.015,
+    textureRealOpacityMax: 0.30,
+    crackOpacityMax: 0.07,
+    glowBaseOpacity: 0.06,
+    glowBumpPeak: 0.02,
+    crackCount: 110,
+    hintFadeDelay: 8000,
+    skipDelayMs: 6000,
+    chainRadiusFactor: 0.70,
+    chainTurns: 1.5,
+
+    frictionThresholdPx: 4,     // 光池压心脏时，250ms 内位移超过此值才算“摩擦”充能
+    frictionWindowMs: 250,
+    idleHintDelayMs: 1200        // 压着心脏静止超过此时长，淡入“动一动光”提示
+  };
+
+  var REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ============================================================
+     DOM refs
+     ============================================================ */
+  var stage = document.getElementById('stage');
+  var actOneEl = document.getElementById('actOne');
+  var actTwoEl = document.getElementById('actTwo');
+  var glowEl = document.getElementById('glow');
+  var vesselsBaseEl = document.getElementById('vesselsBase');
+  var vesselsRealEl = document.getElementById('vesselsReal');
+  var textureBaseEl = document.getElementById('textureBase');
+  var textureRealEl = document.getElementById('textureReal');
+  var crackSvg = document.getElementById('crackSvg');
+  var ringBackGroup = document.getElementById('ringBackGroup');
+  var ringFrontGroup = document.getElementById('ringFrontGroup');
+  var plateLayerBack = document.getElementById('plateLayerBack');
+  var plateLayerFront = document.getElementById('plateLayerFront');
+  var heartImg = document.getElementById('heartImg');
+  var veilEl = document.getElementById('veil');
+  var torchSvg = document.getElementById('torchSvg');
+  var torchGroup = document.getElementById('torchGroup');
+  var bigTextWrap = document.getElementById('bigTextWrap');
+  var bigTextEl = document.getElementById('bigText');
+  var hintEl = document.getElementById('hint');
+  var returningHintEl = document.getElementById('returningHint');
+  var returningHintLink = document.getElementById('returningHintLink');
+  var skipLinkEl = document.getElementById('skipLink');
+  var idleHintEl = document.getElementById('idleHint');
+  var heartSwitcherEl = document.getElementById('heartSwitcher');
+  var replayLink = document.getElementById('replayLink');
+  var eyelidTop = document.getElementById('eyelidTop');
+  var eyelidBottom = document.getElementById('eyelidBottom');
+  var panel = document.getElementById('panel');
+  var panelToggleBtn = document.getElementById('panelToggle');
+
+  var root = document.documentElement;
+
+  /* ============================================================
+     记忆底纹 —— 散布词句（与 v2 一致）
+     ============================================================ */
+  var MEMORY_PHRASES = [
+    "贩卖信息是贬值资产，贩卖视角是升值资产",
+    "框架是梯子，不是牢笼",
+    "没有一个好的钉子，就不要买无数把锤子",
+    "AI 时代最重要的是扎好马步",
+    "用复盘和记录对抗遗忘",
+    "人会消失，字不会",
+    "我缺的不是技能，是让独特性被看见的放大器",
+    "这不是我的简历，是我的思考操作系统",
+    "逻辑、思辨、提问、判断",
+    "营销、审美、决策判断，不可替代",
+    "2,338 篇笔记，308 层目录",
+    "一个月，抖音 0 → 2 万粉",
+    "建造者的证据",
+    "你判断 AI 输出好不好，取决于马步扎得扎不扎实",
+    "我的能力有多少是 AI 给的？",
+    "武林学者",
+    "止损也是能力",
+    "长期资产，活着的数字自我"
+  ];
+
+  function boxesOverlap(a, b, gap){
+    return a.left < b.right + gap && a.right > b.left - gap &&
+           a.top < b.bottom + gap && a.bottom > b.top - gap;
+  }
+
+  function buildTexture(){
+    var w = window.innerWidth, h = window.innerHeight;
+    var GAP = 14;
+    var MAX_TRIES = 60;
+    var heartR = heartImg.getBoundingClientRect();
+    var heartZone = {
+      left: heartR.left - heartR.width*0.4,
+      top: heartR.top - heartR.height*0.5,
+      right: heartR.right + heartR.width*0.4,
+      bottom: heartR.bottom + heartR.height*0.3
+    };
+    var bigTextZone = { left: w*0.06, top: h*0.60, right: w*0.94, bottom: h*0.92 };
+
+    textureBaseEl.innerHTML = '';
+    textureRealEl.innerHTML = '';
+
+    var placed = [];
+
+    for (var i=0;i<MEMORY_PHRASES.length;i++){
+      var text = MEMORY_PHRASES[i];
+      var size = 11 + Math.random()*3;
+      var rotDeg = Math.random()*4 - 2;
+
+      var base = document.createElement('div');
+      base.className = 'memory-phrase';
+      base.style.cssText = 'left:0;top:0;visibility:hidden;font-size:'+size.toFixed(1)+'px;';
+      base.textContent = text;
+      textureBaseEl.appendChild(base);
+      var mw = base.offsetWidth;
+      var mh = base.offsetHeight;
+
+      var rad = Math.abs(rotDeg) * Math.PI / 180;
+      var ebw = mw * Math.cos(rad) + mh * Math.sin(rad);
+      var ebh = mw * Math.sin(rad) + mh * Math.cos(rad);
+
+      var box = null;
+      for (var tries=0; tries<MAX_TRIES; tries++){
+        var left = 4 + Math.random() * Math.max(1, w - ebw - 8);
+        var top = 4 + Math.random() * Math.max(1, h - ebh - 8);
+        var cand = { left: left, top: top, right: left + ebw, bottom: top + ebh };
+        if (boxesOverlap(cand, heartZone, 0)) continue;
+        if (boxesOverlap(cand, bigTextZone, 0)) continue;
+        var collided = false;
+        for (var p=0; p<placed.length; p++){
+          if (boxesOverlap(cand, placed[p], GAP)){ collided = true; break; }
+        }
+        if (!collided){ box = cand; break; }
+      }
+      if (!box){
+        textureBaseEl.removeChild(base);
+        continue;
+      }
+
+      placed.push(box);
+
+      var elLeft = box.left + (ebw - mw) / 2;
+      var elTop = box.top + (ebh - mh) / 2;
+      var styleStr = 'left:'+elLeft.toFixed(1)+'px;top:'+elTop.toFixed(1)+'px;'+
+                      'transform:rotate('+rotDeg.toFixed(2)+'deg);font-size:'+size.toFixed(1)+'px;';
+
+      base.style.cssText = styleStr;
+
+      var real = document.createElement('div');
+      real.className = 'memory-phrase';
+      real.style.cssText = styleStr;
+      real.textContent = text;
+      textureRealEl.appendChild(real);
+    }
+  }
+
+  /* ============================================================
+     终幕大字
+     ============================================================ */
+  var FINALE_LINES = ["你想要", "怎样活这一生？"];
+  var FINALE_CHAR_COUNT = 0;
+
+  function buildFinaleText(){
+    bigTextEl.innerHTML = '';
+    FINALE_CHAR_COUNT = 0;
+    FINALE_LINES.forEach(function(lineText){
+      var line = document.createElement('div');
+      line.className = 'big-line';
+      for (var i=0;i<lineText.length;i++){
+        var span = document.createElement('span');
+        span.className = 'finale-ch';
+        span.textContent = lineText[i];
+        line.appendChild(span);
+        FINALE_CHAR_COUNT++;
+      }
+      bigTextEl.appendChild(line);
+    });
+  }
+
+  function revealFinaleText(){
+    var chs = bigTextEl.querySelectorAll('.finale-ch');
+    var idx = 0;
+    chs.forEach(function(el){
+      el.style.transitionDelay = (idx*80) + 'ms';
+      idx++;
+    });
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        chs.forEach(function(el){ el.classList.add('lit'); });
+      });
+    });
+  }
+
+  function revealFinaleTextInstant(){
+    var chs = bigTextEl.querySelectorAll('.finale-ch');
+    chs.forEach(function(el){
+      el.style.transitionDelay = '0ms';
+      el.classList.add('lit');
+    });
+  }
+
+  function resetFinaleText(){
+    var chs = bigTextEl.querySelectorAll('.finale-ch');
+    chs.forEach(function(el){
+      el.classList.remove('lit');
+      el.style.transitionDelay = '';
+    });
+  }
+
+  /* ============================================================
+     文字锁链 v3 —— 20 字按读序沿一条连续路径排布，3D 字牌 + 链环
+     ============================================================ */
+  var CHAIN_PHRASE = "人不能活一辈子最后只有两个字严父或者慈母";
+  var CHAIN_CHARS = CHAIN_PHRASE.split('');
+  var THETA0_DEG = 205; // 起点：心脏左上方
+  // depth=sin(theta) 在 -1..1 连续变化，只用来做旋转/位移的连续量；
+  // 但前后图层分桶如果直接用 depth>=0，一个整圆里前后各占 50%，
+  // 1.5 圈下来会有超过一半的字落进 0.22 透明度的背面，句子读不下去。
+  // 把分桶阈值下压，让"背面"只占每圈约 30%（真正被心脏挡住的一小段），
+  // 其余约 70% 留在前面保持实色可读，缠绕感仍靠连续的 depth 驱动旋转体现。
+  var DEPTH_FRONT_THRESHOLD = -0.55;
+
+  var allCards = [];  // { el, x,y,z, rotX, rotY, t, theta, depth, index, broken }
+  var allRings = [];  // { g, aIndex, bIndex, x, y }
+  var brokenCount = 0;
+  var heartHitRect = null;
+  var heartCenterPx = { x: 0, y: 0 };
+
+  function heartBodyRect(){
+    var r = heartImg.getBoundingClientRect();
+    var f = PARAMS.chainRadiusFactor;
+    var dw = r.width * (1 - f) / 2, dh = r.height * (1 - f) / 2;
+    return { left: r.left + dw, top: r.top + dh, right: r.right - dw,
+             bottom: r.bottom - dh, width: r.width * f, height: r.height * f };
+  }
+
+  function setHeartScale(s, transition){
+    var t = (transition === undefined) ? '' : transition;
+    heartImg.style.transition = t ? ('transform ' + t) : '';
+    heartImg.style.transform = 'translate(-50%,-50%) scale(' + s + ')';
+  }
+
+  // 链带路径：倾斜 ~20° 的扁椭圆带，绕心脏 1.5 圈，同时随 t 螺旋下沉，
+  // 形成"缠绕"而非简单重复描边的观感。
+  function chainPointAt(heartR, t){
+    var cx = heartR.left + heartR.width/2;
+    var cy = heartR.top + heartR.height/2;
+    var beltRx = heartR.width * 0.60;
+    var beltRy = heartR.height * 0.24;
+    var tiltRad = PARAMS.chainTiltDeg * Math.PI / 180;
+    var theta0Rad = THETA0_DEG * Math.PI / 180;
+    var thetaRad = theta0Rad + t * Math.PI * 2 * PARAMS.chainTurns;
+    var lx = beltRx * Math.cos(thetaRad);
+    var lyRaw = beltRy * Math.sin(thetaRad);
+    var drift = (t - 0.5) * heartR.height * 0.40;
+    var ly = lyRaw + drift;
+    var cosT = Math.cos(tiltRad), sinT = Math.sin(tiltRad);
+    var x = cx + lx*cosT - ly*sinT;
+    var y = cy + lx*sinT + ly*cosT;
+    var depth = Math.sin(thetaRad);
+    return { x: x, y: y, depth: depth, theta: thetaRad };
+  }
+
+  function cardTransformAt(p){
+    var rotY = p.depth * 58;
+    var rotX = Math.cos(p.theta) * 16 + PARAMS.chainTiltDeg * 0.25;
+    var tz = p.depth * 46;
+    return { rotX: rotX, rotY: rotY, tz: tz };
+  }
+
+  function applyCardTransform(card){
+    card.el.style.transform = 'translate3d(' + card.x.toFixed(1) + 'px,' + card.y.toFixed(1) + 'px,' + card.z.toFixed(1) + 'px) rotateX(' + card.rotX.toFixed(1) + 'deg) rotateY(' + card.rotY.toFixed(1) + 'deg)';
+  }
+
+  function makeRingPair(aX, aY, bX, bY, horizFirst, isFront){
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'chain-ring');
+    var mx = (aX+bX)/2, my = (aY+bY)/2;
+    var dx = (bX-aX)*0.14, dy = (bY-aY)*0.14;
+
+    // 前方链段在心脏表面叠一片模糊接触阴影，制造“锁在心脏上”而非“飘在旁边”的贴合感
+    if (isFront){
+      var shadow = document.createElementNS(SVG_NS, 'ellipse');
+      shadow.setAttribute('class', 'chain-ring-shadow');
+      shadow.setAttribute('cx', mx.toFixed(1));
+      shadow.setAttribute('cy', (my+3.2).toFixed(1));
+      shadow.setAttribute('rx', horizFirst ? 11 : 7.5);
+      shadow.setAttribute('ry', horizFirst ? 7.5 : 11);
+      g.appendChild(shadow);
+    }
+
+    var e1 = document.createElementNS(SVG_NS, 'ellipse');
+    e1.setAttribute('class', 'chain-link link-a');
+    e1.setAttribute('cx', (mx-dx).toFixed(1));
+    e1.setAttribute('cy', (my-dy).toFixed(1));
+    e1.setAttribute('rx', horizFirst ? 11 : 6.5);
+    e1.setAttribute('ry', horizFirst ? 6.5 : 11);
+    var e2 = document.createElementNS(SVG_NS, 'ellipse');
+    e2.setAttribute('class', 'chain-link link-b');
+    e2.setAttribute('cx', (mx+dx).toFixed(1));
+    e2.setAttribute('cy', (my+dy).toFixed(1));
+    e2.setAttribute('rx', horizFirst ? 6.5 : 11);
+    e2.setAttribute('ry', horizFirst ? 11 : 6.5);
+    g.appendChild(e1);
+    g.appendChild(e2);
+    return g;
+  }
+
+  function buildChain(){
+    plateLayerBack.innerHTML = '';
+    plateLayerFront.innerHTML = '';
+    ringBackGroup.innerHTML = '';
+    ringFrontGroup.innerHTML = '';
+    allCards = [];
+    allRings = [];
+    brokenCount = 0;
+
+    var heartR = heartBodyRect();
+    var n = CHAIN_CHARS.length;
+
+    for (var i=0;i<n;i++){
+      var t = n > 1 ? i/(n-1) : 0;
+      var p = chainPointAt(heartR, t);
+      var tr = cardTransformAt(p);
+      var layer = p.depth >= DEPTH_FRONT_THRESHOLD ? plateLayerFront : plateLayerBack;
+      var el = document.createElement('div');
+      el.className = 'chain-plate';
+      el.textContent = CHAIN_CHARS[i];
+      layer.appendChild(el);
+      var card = {
+        el: el, x: p.x, y: p.y, z: tr.tz, rotX: tr.rotX, rotY: tr.rotY,
+        t: t, theta: p.theta, depth: p.depth, index: i, broken: false
+      };
+      applyCardTransform(card);
+      allCards.push(card);
+    }
+
+    for (var j=0;j<n-1;j++){
+      var a = allCards[j], b = allCards[j+1];
+      var depthMid = (a.depth + b.depth) / 2;
+      var isFront = depthMid >= DEPTH_FRONT_THRESHOLD;
+      var layerSvg = isFront ? ringFrontGroup : ringBackGroup;
+      var g = makeRingPair(a.x, a.y, b.x, b.y, j % 2 === 0, isFront);
+      layerSvg.appendChild(g);
+      allRings.push({ g: g, aIndex: a.index, bIndex: b.index, x: (a.x+b.x)/2, y: (a.y+b.y)/2 });
+    }
+  }
+
+  function layoutChain(){
+    var heartR = heartBodyRect();
+    allCards.forEach(function(card){
+      if (card.broken) return;
+      var p = chainPointAt(heartR, card.t);
+      var tr = cardTransformAt(p);
+      card.x = p.x; card.y = p.y; card.theta = p.theta; card.depth = p.depth;
+      card.z = tr.tz; card.rotX = tr.rotX; card.rotY = tr.rotY;
+      applyCardTransform(card);
+    });
+    allRings.forEach(function(ring){
+      if (!ring.g.parentNode) return;
+      var a = allCards[ring.aIndex], b = allCards[ring.bIndex];
+      if (!a || !b) return;
+      var mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+      var dx = (b.x-a.x)*0.14, dy = (b.y-a.y)*0.14;
+      var links = ring.g.querySelectorAll('ellipse.chain-link');
+      if (links.length === 2){
+        links[0].setAttribute('cx', (mx-dx).toFixed(1));
+        links[0].setAttribute('cy', (my-dy).toFixed(1));
+        links[1].setAttribute('cx', (mx+dx).toFixed(1));
+        links[1].setAttribute('cy', (my+dy).toFixed(1));
+      }
+      var shadow = ring.g.querySelector('ellipse.chain-ring-shadow');
+      if (shadow){
+        shadow.setAttribute('cx', mx.toFixed(1));
+        shadow.setAttribute('cy', (my+3.2).toFixed(1));
+      }
+      ring.x = mx; ring.y = my;
+    });
+
+    // 命中框向内收 12%：光必须实打实罩在心脏上才充能，擦边不算
+    heartHitRect = {
+      left: heartR.left + heartR.width*0.12,
+      top: heartR.top + heartR.height*0.12,
+      right: heartR.right - heartR.width*0.12,
+      bottom: heartR.bottom - heartR.height*0.12
+    };
+    heartCenterPx = { x: heartR.left + heartR.width/2, y: heartR.top + heartR.height/2 };
+    var originStr = heartCenterPx.x.toFixed(1) + 'px ' + heartCenterPx.y.toFixed(1) + 'px';
+    plateLayerBack.style.transformOrigin = originStr;
+    plateLayerFront.style.transformOrigin = originStr;
+    ringBackGroup.style.transformOrigin = originStr;
+    ringFrontGroup.style.transformOrigin = originStr;
+  }
+
+  function fadeRingsFor(card){
+    allRings.forEach(function(ring){
+      if (ring.aIndex !== card.index && ring.bIndex !== card.index) return;
+      if (!ring.g.parentNode) return;
+      var otherIndex = ring.aIndex === card.index ? ring.bIndex : ring.aIndex;
+      var other = allCards[otherIndex];
+      if (other && !other.broken) return;
+
+      var g = ring.g;
+      if (REDUCED_MOTION){
+        if (g.parentNode) g.parentNode.removeChild(g);
+        return;
+      }
+      var fx = (Math.random()*60-30).toFixed(1);
+      var fy = (80 + Math.random()*70).toFixed(1);
+      var rot = ((Math.random()*260+140) * (Math.random()<0.5?-1:1)).toFixed(0);
+      g.style.transition = 'transform 420ms ease-out, opacity 420ms ease-out';
+      requestAnimationFrame(function(){
+        g.style.transform = 'translate(' + fx + 'px,' + fy + 'px) rotate(' + rot + 'deg) scale(0.5)';
+        g.style.opacity = '0';
+      });
+      setTimeout(function(){ if (g.parentNode) g.parentNode.removeChild(g); }, 440);
+    });
+  }
+
+  function breakCard(card){
+    if (card.broken) return;
+    card.broken = true;
+    brokenCount++;
+
+    if (REDUCED_MOTION){
+      if (card.el.parentNode) card.el.parentNode.removeChild(card.el);
+    } else {
+      var fallX = (Math.random()*140-70);
+      var fallRotX = card.rotX + (Math.random()<0.5?-1:1) * (500 + Math.random()*260);
+      var fallRotY = card.rotY + (Math.random()<0.5?-1:1) * (420 + Math.random()*300);
+      var tz = card.z - 90;
+      // 化墨：不再靠卡片底色收缩成圆点，改用 blur + text-shadow 坍缩成一团墨渍再淡出
+      card.el.style.transition = 'transform 700ms cubic-bezier(0.55,0,1,0.45), opacity 650ms ease-in, filter 700ms ease-in, text-shadow 500ms ease-in';
+      requestAnimationFrame(function(){
+        card.el.style.transform = 'translate3d(' + (card.x+fallX).toFixed(1) + 'px,' + (card.y+200).toFixed(1) + 'px,' + tz.toFixed(1) + 'px) rotateX(' + fallRotX.toFixed(1) + 'deg) rotateY(' + fallRotY.toFixed(1) + 'deg)';
+        card.el.style.opacity = '0';
+        card.el.style.filter = 'blur(6px)';
+        card.el.style.textShadow = '0 0 8px rgba(26,26,26,0.5)';
+      });
+      setTimeout(function(){
+        if (card.el.parentNode) card.el.parentNode.removeChild(card.el);
+      }, 720);
+    }
+
+    fadeRingsFor(card);
+
+    if (brokenCount === allCards.length){
+      onSentenceBroken();
+    }
+  }
+
+  function breakEarliestCard(){
+    for (var i=0;i<allCards.length;i++){
+      if (!allCards[i].broken){ breakCard(allCards[i]); return; }
+    }
+  }
+
+  function breakAllInstant(){
+    allCards.forEach(function(c){
+      if (c.broken) return;
+      c.broken = true;
+      brokenCount++;
+      if (c.el.parentNode) c.el.parentNode.removeChild(c.el);
+    });
+    allRings.forEach(function(r){
+      if (r.g.parentNode) r.g.parentNode.removeChild(r.g);
+    });
+  }
+
+  /* ============================================================
+     冰裂纹（与 v2 一致，命中半径改用光池半径）
+     ============================================================ */
+  var cracks = [];
+
+  function buildCracks(){
+    crackSvg.innerHTML = '';
+    cracks = [];
+    var w = window.innerWidth, h = window.innerHeight;
+    var n = PARAMS.crackCount;
+
+    for (var i=0;i<n;i++){
+      var segCount = 3 + Math.floor(Math.random()*4);
+      var targetLen = 60 + Math.random()*160;
+      var avgSeg = targetLen/segCount;
+      var x = Math.random()*w, y = Math.random()*h;
+      var angle = Math.random()*Math.PI*2;
+      var pts = [[x,y]];
+      var sumX = x, sumY = y;
+      for (var s=0;s<segCount;s++){
+        var len = avgSeg * (0.65 + Math.random()*0.7);
+        angle += (Math.random()*1.4 - 0.7);
+        x += Math.cos(angle)*len;
+        y += Math.sin(angle)*len;
+        pts.push([x,y]);
+        sumX += x; sumY += y;
+      }
+      var cx = sumX/(segCount+1), cy = sumY/(segCount+1);
+
+      var ptsStr = pts.map(function(p){ return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ');
+      var pl = document.createElementNS(SVG_NS,'polyline');
+      pl.setAttribute('points', ptsStr);
+      pl.setAttribute('class', 'crack');
+      crackSvg.appendChild(pl);
+
+      var len = pl.getTotalLength();
+      pl.style.strokeDasharray = len;
+      pl.style.strokeDashoffset = len;
+
+      cracks.push({ el: pl, cx: cx, cy: cy, len: len, revealed: false });
+    }
+  }
+
+  function revealCrack(c, instant){
+    if (c.revealed) return;
+    c.revealed = true;
+    if (instant || REDUCED_MOTION){
+      c.el.style.transition = 'none';
+    } else {
+      c.el.style.transition = '';
+    }
+    c.el.style.strokeDashoffset = 0;
+    c.el.classList.add('revealed');
+    if (instant || REDUCED_MOTION){
+      void c.el.offsetWidth;
+      c.el.style.transition = '';
+    }
+  }
+
+  function hitTestCracks(fx, fy){
+    var r2 = PARAMS.poolRadius * PARAMS.poolRadius;
+    for (var i=0;i<cracks.length;i++){
+      var c = cracks[i];
+      if (c.revealed) continue;
+      var dx = c.cx - fx, dy = c.cy - fy;
+      if (dx*dx + dy*dy <= r2){
+        revealCrack(c);
+      }
+    }
+  }
+
+  /* ============================================================
+     俯视手电筒：光标位置即手电位置，图标偏移(30,-30)，光池偏移(0,20)
+     ============================================================ */
+  var W = window.innerWidth, H = window.innerHeight;
+  var TORCH_OFFSET = { x: 30, y: -30 };
+  var POOL_OFFSET = { x: 0, y: 20 };
+  // 两个偏移都是相对光标的常量，二者之间的相对向量恒定，手电角度只需算一次
+  var TORCH_ANGLE_DEG = (Math.atan2(
+    POOL_OFFSET.y - TORCH_OFFSET.y,
+    POOL_OFFSET.x - TORCH_OFFSET.x
+  ) * 180 / Math.PI) - 90;
+
+  function computeLayout(){
+    W = window.innerWidth; H = window.innerHeight;
+  }
+
+  /* ============================================================
+     指针 / 触摸
+     ============================================================ */
+  var pointerX = window.innerWidth * 0.5;
+  var pointerY = window.innerHeight * 0.42;
+  var userHasMoved = false;
+
+  // 摩擦挣脱：记录最近位置样本，用于判断“最近 frictionWindowMs 内位移是否够大”
+  var moveHistory = [];
+
+  function onPointerMove(x, y){
+    pointerX = x; pointerY = y; userHasMoved = true;
+    var now = (window.performance && performance.now) ? performance.now() : Date.now();
+    moveHistory.push({ x: x, y: y, t: now });
+    while (moveHistory.length > 1 && now - moveHistory[0].t > PARAMS.frictionWindowMs + 60){
+      moveHistory.shift();
+    }
+  }
+
+  // 返回“当前位置”相对“frictionWindowMs 前位置”的净位移（不是路径总长）
+  function recentDisplacement(){
+    // 路径长度而非净位移：来回搓的周期若恰好≈窗口时长，净位移会归零漏判
+    if (moveHistory.length < 2) return 0;
+    var now = (window.performance && performance.now) ? performance.now() : Date.now();
+    var windowMs = PARAMS.frictionWindowMs;
+    var dist = 0, prev = null;
+    for (var i=0;i<moveHistory.length;i++){
+      if (now - moveHistory[i].t > windowMs) continue;
+      if (prev){
+        var dx = moveHistory[i].x - prev.x, dy = moveHistory[i].y - prev.y;
+        dist += Math.sqrt(dx*dx + dy*dy);
+      }
+      prev = moveHistory[i];
+    }
+    if (prev){
+      var dx2 = pointerX - prev.x, dy2 = pointerY - prev.y;
+      dist += Math.sqrt(dx2*dx2 + dy2*dy2);
+    }
+    return dist;
+  }
+
+  window.addEventListener('mousemove', function(e){ onPointerMove(e.clientX, e.clientY); }, { passive: true });
+  window.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length) onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  window.addEventListener('touchstart', function(e){
+    if (e.touches && e.touches.length) onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+
+  /* ============================================================
+     心跳：lub-dub，幅度/频率随充能进度变化（与 v2 一致）
+     ============================================================ */
+  function easeOut(t){ return 1 - Math.pow(1-t, 3); }
+
+  function heartScaleAt(phase, amp){
+    var mainAmp = 0.045 * amp;
+    var secAmp = 0.022 * amp;
+    if (phase < 120){
+      var p = phase/120;
+      return 1 + mainAmp * easeOut(p);
+    } else if (phase < 400){
+      var p2 = (phase-120)/280;
+      return 1 + mainAmp - mainAmp * easeOut(p2);
+    } else if (phase < 460){
+      return 1;
+    } else if (phase < 520){
+      var p3 = (phase-460)/60;
+      return 1 + secAmp * easeOut(p3);
+    } else if (phase < 660){
+      var p4 = (phase-520)/140;
+      return 1 + secAmp - secAmp * easeOut(p4);
+    }
+    return 1;
+  }
+
+  var beatTime = 0;
+  var lastTs = null;
+  var pauseBeatUntil = 0;
+  var glowBloomActive = false;
+  var glowBaselineRuntime = PARAMS.glowBaseOpacity;
+  var kaiyanFired = false;
+  var actOneFinished = false;
+  var blinkInProgress = false;
+  var chargeElapsed = 0;
+  var chargeActivity = 0;     // 0..1，摩擦挣脱的“活跃度”，静止时缓落
+  var bpmSmoothed = PARAMS.restBpm;
+  var stillStartTs = null;     // 压着心脏但位移不够的起始时间戳（用于 idleHint 延时）
+
+  function triggerBigBeatHold(){
+    pauseBeatUntil = Infinity;
+    setHeartScale('1.09', '150ms cubic-bezier(0.22,1,0.36,1)');
+    setTimeout(function(){
+      setHeartScale('1', '400ms cubic-bezier(0.22,1,0.36,1)');
+      setTimeout(function(){
+        setHeartScale('1');
+        beatTime = 0;
+        pauseBeatUntil = 0;
+      }, 420);
+    }, 950);
+  }
+
+  function onSentenceBroken(){
+    if (kaiyanFired) return;
+    kaiyanFired = true;
+
+    allRings.forEach(function(ring){
+      if (!ring.g.parentNode) return;
+      ring.g.style.transition = 'opacity 400ms ease-out';
+      ring.g.style.opacity = '0';
+      setTimeout(function(){ if (ring.g.parentNode) ring.g.parentNode.removeChild(ring.g); }, 420);
+    });
+
+    if (REDUCED_MOTION){
+      heartImg.style.filter = 'brightness(1.15) saturate(1.5) contrast(1.05) sepia(0.08)';
+      glowBaselineRuntime = 0.12;
+      glowEl.style.opacity = glowBaselineRuntime.toFixed(4);
+      revealFinaleTextInstant();
+      actOneFinished = true;
+      return;
+    }
+
+    triggerBigBeatHold();
+
+    glowBloomActive = true;
+    glowEl.style.transition = 'opacity 1200ms cubic-bezier(0.22,1,0.36,1), transform 1200ms cubic-bezier(0.22,1,0.36,1)';
+    glowEl.style.opacity = '0.30';
+    glowEl.style.transform = 'translate(-50%,-50%) scale(1.2)';
+    setTimeout(function(){
+      glowEl.style.transition = 'opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1)';
+      glowEl.style.opacity = '0.12';
+      glowEl.style.transform = 'translate(-50%,-50%) scale(1)';
+      glowBaselineRuntime = 0.12;
+      setTimeout(function(){
+        glowEl.style.transition = '';
+        glowBloomActive = false;
+      }, 520);
+    }, 1200);
+
+    setTimeout(function(){
+      textureRealEl.classList.add('reveal-all');
+      vesselsRealEl.classList.add('reveal-all');
+      setTimeout(function(){
+        textureRealEl.classList.remove('reveal-all');
+        vesselsRealEl.classList.remove('reveal-all');
+      }, 800);
+    }, 300);
+
+    setTimeout(function(){
+      revealFinaleText();
+    }, 1350);
+
+    var finaleRevealMs = FINALE_CHAR_COUNT * 80 + 500;
+    setTimeout(function(){
+      if (actOneFinished) return;
+      actOneFinished = true;
+      runBlink(true, null);
+    }, 1350 + finaleRevealMs + 1400);
+  }
+
+  /* ============================================================
+     眨眼转场 + 幕间切换
+     ============================================================ */
+  function swapActs(showActTwo){
+    if (showActTwo){
+      actOneEl.style.display = 'none';
+      actTwoEl.style.display = 'block';
+    } else {
+      actTwoEl.style.display = 'none';
+      actOneEl.style.display = 'block';
+    }
+  }
+
+  function setEyelids(closed, durationMs, timingFn, cb){
+    eyelidTop.style.transition = 'transform ' + durationMs + 'ms ' + timingFn;
+    eyelidBottom.style.transition = 'transform ' + durationMs + 'ms ' + timingFn;
+    requestAnimationFrame(function(){
+      eyelidTop.style.transform = closed ? 'translateY(0)' : 'translateY(calc(-100% - 32px))';
+      eyelidBottom.style.transform = closed ? 'translateY(0)' : 'translateY(calc(100% + 32px))';
+    });
+    if (cb) setTimeout(cb, durationMs);
+  }
+
+  // 真眼睑弧线：眼裂（两眼睑之间的缝）中间宽、两端收尖，靠 clip-path 的
+  // 二次贝塞尔实现——border-radius 只能内切圆角（中点始终顶到最深处，
+  // 两端往回收），做不出“中点让开、两端往下/往上探”的正确方向，这正是
+  // 旧版“反着的”根因。EYELID_TOP_VH / EYELID_BOTTOM_VH 需与上面 CSS 的
+  // height 保持一致。
+  var EYELID_TOP_VH = 0.78;
+  var EYELID_BOTTOM_VH = 0.34;
+
+  function buildEyelidPaths(){
+    var w = window.innerWidth;
+    var hTop = window.innerHeight * EYELID_TOP_VH;
+    var hBottom = window.innerHeight * EYELID_BOTTOM_VH;
+    // 两片眼睑在闭合位重叠的余量：曲线的“收起量”必须小于这个余量，
+    // 否则中点会在闭合态露出一条缝（弧度吃掉了原本的重叠保险）。
+    // 按 62%/28% 分配（留 10% 安全边际），任意视口高度下都不会开缝。
+    var overlapPx = Math.max(0, hTop + hBottom - window.innerHeight);
+    var droopTop = overlapPx * 0.62;    // 上眼睑：中点向上收起的量
+    var bulgeBottom = overlapPx * 0.28; // 下眼睑：中点向下收起的量
+
+    var topPath = 'M0,0 L0,' + hTop.toFixed(1) +
+      ' Q' + (w/2).toFixed(1) + ',' + (hTop - 2*droopTop).toFixed(1) + ' ' + w.toFixed(1) + ',' + hTop.toFixed(1) +
+      ' L' + w.toFixed(1) + ',0 Z';
+    var bottomPath = 'M0,' + hBottom.toFixed(1) + ' L0,0' +
+      ' Q' + (w/2).toFixed(1) + ',' + (2*bulgeBottom).toFixed(1) + ' ' + w.toFixed(1) + ',0' +
+      ' L' + w.toFixed(1) + ',' + hBottom.toFixed(1) + ' Z';
+
+    eyelidTop.style.clipPath = 'path("' + topPath + '")';
+    eyelidBottom.style.clipPath = 'path("' + bottomPath + '")';
+  }
+
+  var blinkGen = 0; // 世代号：新的眨眼/硬切会作废仍在飞的旧回调
+
+  function runBlink(targetIsActTwo, extraWork){
+    if (REDUCED_MOTION){
+      if (extraWork) extraWork();
+      swapActs(targetIsActTwo);
+      if (targetIsActTwo) localStorage.setItem('kaiyan_done', '1');
+      return;
+    }
+    if (blinkInProgress) return;
+    blinkInProgress = true;
+    var gen = ++blinkGen;
+    // 真人眨眼节奏：闭合快（~200ms ease-in）、停留 180ms、睁开慢（~450ms ease-out）
+    setEyelids(true, 200, 'ease-in', function(){
+      setTimeout(function(){
+        if (gen !== blinkGen) return; // 已被硬切取代，放弃
+        if (extraWork) extraWork();
+        swapActs(targetIsActTwo);
+        if (targetIsActTwo) localStorage.setItem('kaiyan_done', '1');
+        setEyelids(false, 450, 'ease-out', function(){ blinkInProgress = false; });
+      }, 180);
+    });
+  }
+
+  function resetToActOneState(){
+    // 防御：无论从哪条路径进来，确保幕布层级正确
+    actTwoEl.style.display = 'none';
+    actOneEl.style.display = 'block';
+    kaiyanFired = false;
+    actOneFinished = false;
+    chargeElapsed = 0;
+    chargeActivity = 0;
+    bpmSmoothed = PARAMS.restBpm;
+    stillStartTs = null;
+    moveHistory = [];
+    idleHintEl.classList.remove('show');
+    beatTime = 0;
+    lastTs = null;
+    pauseBeatUntil = 0;
+    glowBloomActive = false;
+    glowBaselineRuntime = PARAMS.glowBaseOpacity;
+    glowEl.style.transition = '';
+    glowEl.style.opacity = PARAMS.glowBaseOpacity.toFixed(4);
+    glowEl.style.transform = 'translate(-50%,-50%) scale(1)';
+    heartImg.style.transition = '';
+    heartImg.style.filter = 'brightness(1.1) saturate(1.05) contrast(1.02)';
+    setHeartScale('1');
+    resetFinaleText();
+    buildChain();
+    layoutChain();
+    buildCracks();
+    buildTexture();
+    textureRealEl.classList.remove('reveal-all');
+    vesselsRealEl.classList.remove('reveal-all');
+    hintEl.classList.remove('hidden');
+    skipLinkEl.classList.remove('show');
+    initHintTimer();
+    initSkipTimer();
+    initReturningHint();
+    if (REDUCED_MOTION) initReducedMotionClick();
+  }
+
+  /* ============================================================
+     主循环
+     ============================================================ */
+  var TORCH_MARGIN = 20;
+
+  function mainFrame(ts){
+    if (lastTs == null) lastTs = ts;
+    var dt = ts - lastTs;
+    lastTs = ts;
+    if (dt > 80) dt = 80;
+
+    var px = Math.max(TORCH_MARGIN, Math.min(pointerX, W - TORCH_MARGIN));
+    var py = Math.max(TORCH_MARGIN, Math.min(pointerY, H - TORCH_MARGIN));
+    var poolX = px + POOL_OFFSET.x;
+    var poolY = py + POOL_OFFSET.y;
+    var torchX = px + TORCH_OFFSET.x;
+    var torchY = py + TORCH_OFFSET.y;
+
+    torchGroup.setAttribute('transform', 'translate(' + torchX.toFixed(1) + ',' + torchY.toFixed(1) + ') rotate(' + TORCH_ANGLE_DEG.toFixed(1) + ')');
+    root.style.setProperty('--mx', poolX.toFixed(1) + 'px');
+    root.style.setProperty('--my', poolY.toFixed(1) + 'px');
+
+    hitTestCracks(poolX, poolY);
+
+    var intersecting = false;
+    var activeCharging = false;
+    if (!kaiyanFired && heartHitRect && userHasMoved){
+      var nx = Math.max(heartHitRect.left, Math.min(poolX, heartHitRect.right));
+      var ny = Math.max(heartHitRect.top, Math.min(poolY, heartHitRect.bottom));
+      var ddx = poolX - nx, ddy = poolY - ny;
+      intersecting = (ddx*ddx + ddy*ddy) <= (PARAMS.poolRadius*PARAMS.poolRadius);
+
+      // 摩擦挣脱：光池压着心脏还不够，最近 frictionWindowMs 内的净位移
+      // 必须超过阈值才算“在磨”，静止挂机不再掉字
+      activeCharging = intersecting && recentDisplacement() > PARAMS.frictionThresholdPx;
+
+      if (activeCharging){
+        chargeElapsed += dt;
+        var intervalMs = PARAMS.breakIntervalSec * 1000;
+        var guard = 0;
+        while (chargeElapsed >= intervalMs && !kaiyanFired && guard < 30){
+          chargeElapsed -= intervalMs;
+          breakEarliestCard();
+          guard++;
+        }
+      }
+      // 不在磨（静止或没压着心脏）：chargeElapsed 原地冻结，不清零 ——
+      // “暂停”不是“作废”，重新磨起来从断点接着算。
+
+      if (intersecting && !activeCharging){
+        if (stillStartTs == null) stillStartTs = ts;
+        if (ts - stillStartTs > PARAMS.idleHintDelayMs){
+          idleHintEl.style.left = poolX.toFixed(1) + 'px';
+          idleHintEl.style.top = (poolY + PARAMS.poolRadius*0.5 + 14).toFixed(1) + 'px';
+          idleHintEl.classList.add('show');
+        }
+      } else {
+        stillStartTs = null;
+        idleHintEl.classList.remove('show');
+      }
+    } else {
+      stillStartTs = null;
+      idleHintEl.classList.remove('show');
+    }
+
+    // 活跃度：摩擦时快速升，静止时缓落（bpm 跟着缓落回静息，而不是瞬间僵在原地）
+    if (activeCharging){
+      chargeActivity = Math.min(1, chargeActivity + dt * 0.008);
+    } else {
+      chargeActivity = Math.max(0, chargeActivity - dt * 0.0015);
+    }
+
+    var fraction = allCards.length ? Math.min(1, brokenCount/allCards.length) : 0;
+    var liveFraction = Math.min(1, fraction + chargeActivity * 0.5 * (1 - fraction));
+    var targetBpm = PARAMS.restBpm + (PARAMS.chargeBpmMax - PARAMS.restBpm) * liveFraction;
+    bpmSmoothed += (targetBpm - bpmSmoothed) * Math.min(1, dt * 0.006);
+
+    if (ts >= pauseBeatUntil){
+      beatTime += dt;
+      var Tc = 60000 / Math.max(1, bpmSmoothed);
+      var phase = beatTime % Tc;
+      var ampFactor = 1 + fraction * 0.8;
+      var s = heartScaleAt(phase, ampFactor);
+      setHeartScale(s.toFixed(4));
+
+      var pulseNorm = Math.max(0, (s-1)) / (0.045 * ampFactor);
+      var warm = Math.min(0.9, fraction * 0.6 + pulseNorm * fraction * 0.3);
+
+      heartImg.style.filter = 'brightness(' + (1.1 + warm*0.05).toFixed(3) +
+        ') saturate(' + (1.05 + warm*0.4).toFixed(3) +
+        ') contrast(1.02) sepia(' + (warm*0.08).toFixed(3) + ')';
+
+      var chainScale = 1 + Math.max(0, (s-1)) * 0.22;
+      plateLayerBack.style.transform = 'scale(' + chainScale.toFixed(4) + ')';
+      plateLayerFront.style.transform = 'scale(' + chainScale.toFixed(4) + ')';
+      ringBackGroup.style.transform = 'scale(' + chainScale.toFixed(4) + ')';
+      ringFrontGroup.style.transform = 'scale(' + chainScale.toFixed(4) + ')';
+
+      vesselsBaseEl.style.opacity = (PARAMS.vesselBaseOpacity + warm*0.05).toFixed(3);
+
+      if (!glowBloomActive){
+        var bump = pulseNorm * PARAMS.glowBumpPeak;
+        glowEl.style.opacity = (glowBaselineRuntime + bump).toFixed(4);
+      }
+    }
+
+    requestAnimationFrame(mainFrame);
+  }
+
+  /* ============================================================
+     提示语 / 跳过 / 记忆
+     ============================================================ */
+  var hintTimer = null, skipTimer = null;
+
+  function initHintTimer(){
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function(){ hintEl.classList.add('hidden'); }, PARAMS.hintFadeDelay);
+  }
+
+  function initSkipTimer(){
+    clearTimeout(skipTimer);
+    skipTimer = setTimeout(function(){ skipLinkEl.classList.add('show'); }, PARAMS.skipDelayMs);
+  }
+
+  function initReturningHint(){
+    returningHintEl.style.display = (localStorage.getItem('kaiyan_done') === '1') ? 'block' : 'none';
+  }
+
+  skipLinkEl.addEventListener('click', function(){
+    if (actOneFinished) return;
+    actOneFinished = true;
+    runBlink(true, null);
+  });
+
+  returningHintLink.addEventListener('click', function(e){
+    e.preventDefault();
+    if (actOneFinished) return;
+    actOneFinished = true;
+    runBlink(true, null);
+  });
+
+  replayLink.addEventListener('click', function(e){
+    e.preventDefault();
+    // 竞态兜底：上一次眨眼没走完时硬切并作废其回调，避免第二幕残留/回盖
+    if (blinkInProgress){
+      blinkGen++;
+      blinkInProgress = false;
+      resetToActOneState();
+      swapActs(false);
+      setEyelids(false, 300, 'ease-out', null);
+      return;
+    }
+    runBlink(false, resetToActOneState);
+  });
+
+  /* ============================================================
+     reduced-motion：点击心脏直接完成第一幕
+     ============================================================ */
+  function initReducedMotionClick(){
+    heartImg.classList.add('clickable');
+    heartImg.onclick = function(){
+      if (kaiyanFired) return;
+      breakAllInstant();
+      onSentenceBroken();
+    };
+  }
+
+  /* ============================================================
+     心脏三档切换
+     ============================================================ */
+  function initHeartSwitcher(){
+    var dots = heartSwitcherEl.querySelectorAll('.heart-dot');
+    dots.forEach(function(dot){
+      function activate(e){
+        if (e) e.preventDefault();
+        var src = dot.getAttribute('data-src');
+        if (heartImg.getAttribute('src') === src) return;
+        heartImg.setAttribute('src', src);
+        dots.forEach(function(d){ d.classList.remove('active'); });
+        dot.classList.add('active');
+        layoutChain();
+      }
+      dot.addEventListener('click', activate);
+      dot.addEventListener('touchstart', activate, { passive: false });
+    });
+  }
+
+  /* ============================================================
+     调参面板
+     ============================================================ */
+  function initPanel(){
+    var map = [
+      { id: 'p-heartSize', val: 'v-heartSize', key: 'heartSize', decimals: 0, onChange: function(v){ root.style.setProperty('--heart-vh', v+'vh'); } },
+      { id: 'p-restBpm', val: 'v-restBpm', key: 'restBpm', decimals: 0 },
+      { id: 'p-chargeBpmMax', val: 'v-chargeBpmMax', key: 'chargeBpmMax', decimals: 0 },
+      { id: 'p-breakInterval', val: 'v-breakInterval', key: 'breakIntervalSec', decimals: 2 },
+      { id: 'p-poolRadius', val: 'v-poolRadius', key: 'poolRadius', decimals: 0, onChange: function(v){ root.style.setProperty('--pool-radius', v+'px'); } },
+      { id: 'p-veilStrength', val: 'v-veilStrength', key: 'veilStrength', decimals: 2, onChange: function(v){ root.style.setProperty('--veil-strength', v); } },
+      { id: 'p-vesselBase', val: 'v-vesselBase', key: 'vesselBaseOpacity', decimals: 3, onChange: function(v){ root.style.setProperty('--vessel-base-opacity', v); } },
+      { id: 'p-vesselPool', val: 'v-vesselPool', key: 'vesselPoolOpacityMax', decimals: 2, onChange: function(v){ root.style.setProperty('--vessel-pool-opacity-max', v); } },
+      { id: 'p-chainTilt', val: 'v-chainTilt', key: 'chainTiltDeg', decimals: 0, onChange: function(){ layoutChain(); } },
+      { id: 'p-frictionThreshold', val: 'v-frictionThreshold', key: 'frictionThresholdPx', decimals: 1 }
+    ];
+
+    map.forEach(function(m){
+      var input = document.getElementById(m.id);
+      var out = document.getElementById(m.val);
+      input.value = PARAMS[m.key];
+      out.textContent = Number(PARAMS[m.key]).toFixed(m.decimals);
+      input.addEventListener('input', function(){
+        var v = parseFloat(input.value);
+        PARAMS[m.key] = v;
+        out.textContent = v.toFixed(m.decimals);
+        if (m.onChange) m.onChange(v);
+      });
+    });
+
+    window.addEventListener('keydown', function(e){
+      if (e.key === 'd' || e.key === 'D'){
+        panel.classList.toggle('open');
+      }
+    });
+
+    panelToggleBtn.addEventListener('click', function(){
+      panel.classList.toggle('open');
+    });
+  }
+
+  /* ============================================================
+     resize —— 重排链条 / 纹理 / 裂纹，真居中由 #stage 的 fixed+inset:0 保证
+     ============================================================ */
+  var resizeTimer = null;
+  function onResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      computeLayout();
+      buildTexture();
+      layoutChain();
+      buildEyelidPaths();
+      if (!kaiyanFired){
+        buildCracks();
+      }
+    }, 200);
+  }
+  window.addEventListener('resize', onResize);
+
+  /* ============================================================
+     init
+     ============================================================ */
+  function init(){
+    root.style.setProperty('--texture-base-opacity', PARAMS.textureBaseOpacity);
+    root.style.setProperty('--texture-real-opacity-max', PARAMS.textureRealOpacityMax);
+    root.style.setProperty('--crack-opacity-max', PARAMS.crackOpacityMax);
+    root.style.setProperty('--glow-base-opacity', PARAMS.glowBaseOpacity);
+    // 窄屏（手机竖屏）：心脏缩档，否则链条轨道超出屏宽
+    if (window.innerWidth < 600){
+      PARAMS.heartSize = Math.min(PARAMS.heartSize, 30);
+      PARAMS.poolRadius = Math.min(PARAMS.poolRadius, 110);
+    }
+    root.style.setProperty('--heart-vh', PARAMS.heartSize + 'vh');
+    root.style.setProperty('--pool-radius', PARAMS.poolRadius + 'px');
+    root.style.setProperty('--veil-strength', PARAMS.veilStrength);
+    root.style.setProperty('--vessel-base-opacity', PARAMS.vesselBaseOpacity);
+    root.style.setProperty('--vessel-pool-opacity-max', PARAMS.vesselPoolOpacityMax);
+
+    computeLayout();
+    buildTexture();
+    buildFinaleText();
+    buildChain();
+    layoutChain();
+    buildCracks();
+    buildEyelidPaths();
+    initHintTimer();
+    initSkipTimer();
+    initReturningHint();
+    initPanel();
+    initHeartSwitcher();
+
+    var initPx = Math.max(TORCH_MARGIN, Math.min(pointerX, W - TORCH_MARGIN));
+    var initPy = Math.max(TORCH_MARGIN, Math.min(pointerY, H - TORCH_MARGIN));
+    torchGroup.setAttribute('transform', 'translate(' + (initPx+TORCH_OFFSET.x).toFixed(1) + ',' + (initPy+TORCH_OFFSET.y).toFixed(1) + ') rotate(' + TORCH_ANGLE_DEG.toFixed(1) + ')');
+    root.style.setProperty('--mx', (initPx+POOL_OFFSET.x).toFixed(1) + 'px');
+    root.style.setProperty('--my', (initPy+POOL_OFFSET.y).toFixed(1) + 'px');
+
+    if (REDUCED_MOTION){
+      setHeartScale('1');
+      glowEl.style.opacity = PARAMS.glowBaseOpacity;
+      initReducedMotionClick();
+    } else {
+      requestAnimationFrame(mainFrame);
+    }
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

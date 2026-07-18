@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>开眼 · demo</title>
+<style>
+  :root{
+    --mx: 50vw;
+    --my: 38vh;
+    --spotlight-radius: 130px;
+    --texture-base-opacity: 0.022;
+    --texture-real-opacity-max: 0.38;
+    --crack-opacity-max: 0.07;
+    --glow-base-opacity: 0.06;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #FAFAF8;
+    color: #1A1A1A;
+    font-family: "Songti SC", "STSong", serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #stage{
+    position: relative;
+    width: 100vw;
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  /* ---------- 1. 纸背落日光晕 ---------- */
+  #glow{
+    position: absolute;
+    left: 50%;
+    top: 68%;
+    width: min(140vw, 1600px);
+    height: min(140vw, 1600px);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle at 50% 50%,
+      #E8C97D 0%,
+      rgba(232,201,125,0.65) 18%,
+      #8B2E2E 42%,
+      rgba(139,46,46,0.0) 72%);
+    filter: blur(40px);
+    opacity: var(--glow-base-opacity);
+    pointer-events: none;
+    will-change: opacity, transform;
+    z-index: 1;
+  }
+
+  /* ---------- 2. 记忆底纹 ---------- */
+  #textureLayer{
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+  #textureBase, #textureReal{
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  #textureBase{
+    opacity: var(--texture-base-opacity);
+  }
+  #textureReal{
+    opacity: var(--texture-real-opacity-max);
+    -webkit-mask-image: radial-gradient(circle var(--spotlight-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(circle var(--spotlight-radius) at var(--mx) var(--my), #000 0%, #000 55%, transparent 100%);
+  }
+  #textureReal.reveal-all{
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.1;
+    transition: opacity 800ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .memory-phrase{
+    position: absolute;
+    white-space: nowrap;
+    color: #1A1A1A;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- 3. 心脏影子 ---------- */
+  #heartShadow{
+    position: absolute;
+    left: 50%;
+    top: 23%;
+    width: 120px;
+    height: 120px;
+    transform: translate(-50%, -50%);
+    filter: blur(24px);
+    opacity: 0.08;
+    pointer-events: none;
+    z-index: 3;
+    will-change: transform;
+  }
+  #heartShadow svg{ width: 100%; height: 100%; display: block; }
+
+  /* ---------- 5. 墨线 ---------- */
+  #inkLineSvg{
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    overflow: visible;
+  }
+  #inkLineGroup{
+    transform-origin: 50% 30%;
+    transition: transform 300ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .ink-base{
+    fill: none;
+    stroke: #1A1A1A;
+    stroke-width: 0.6;
+    stroke-linecap: round;
+    opacity: 0.25;
+    transition: stroke-dashoffset 260ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .ink-pulse{
+    fill: none;
+    stroke: #8B2E2E;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    opacity: 0.75;
+  }
+
+  /* ---------- 6. 冰裂纹 ---------- */
+  #crackSvg{
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    overflow: visible;
+    transition: transform 150ms cubic-bezier(0.22,1,0.36,1);
+  }
+  #crackSvg.settled{
+    transform: translateY(1px);
+  }
+  .crack{
+    fill: none;
+    stroke: #1A1A1A;
+    stroke-width: 0.5;
+    opacity: 0;
+    transition: stroke-dashoffset 600ms cubic-bezier(0.22,1,0.36,1), opacity 600ms cubic-bezier(0.22,1,0.36,1);
+  }
+  .crack.revealed{
+    opacity: var(--crack-opacity-max);
+  }
+
+  /* ---------- 7. 大字 ---------- */
+  #bigTextWrap{
+    position: absolute;
+    left: 50%;
+    top: 56%;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    text-align: center;
+    pointer-events: none;
+  }
+  #bigText{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.18em;
+    font-size: clamp(48px, 10vw, 96px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: 0.04em;
+  }
+  .big-line{ white-space: nowrap; }
+  .ch{
+    display: inline-block;
+    color: #1A1A1A;
+    opacity: 0.04;
+    transform: translateY(3px);
+    transition: opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1), color 300ms ease-out;
+  }
+  .ch.lit{
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .ch.ink-arrive{
+    color: #6B1F1F;
+  }
+  #progressLine{
+    margin: 22px auto 0;
+    height: 1px;
+    background: rgba(26,26,26,0.15);
+    position: relative;
+    overflow: hidden;
+    transition: opacity 500ms cubic-bezier(0.22,1,0.36,1);
+  }
+  #progressFill{
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0%;
+    background: #8B2E2E;
+    transition: width 400ms cubic-bezier(0.22,1,0.36,1);
+  }
+
+  /* ---------- 顶部小字 / 提示 ---------- */
+  #topText{
+    position: absolute;
+    top: 6.5%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    font-size: clamp(12px, 1.5vw, 15px);
+    color: rgba(26,26,26,0.42);
+    letter-spacing: 0.04em;
+    text-align: center;
+    max-width: 82vw;
+    pointer-events: none;
+  }
+  #hint{
+    position: absolute;
+    top: 32%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    font-size: 13px;
+    color: rgba(26,26,26,0.34);
+    letter-spacing: 0.06em;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1200ms ease-out;
+  }
+  #hint.hidden{ opacity: 0; }
+
+  /* ---------- 调参面板 ---------- */
+  #panel{
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 20;
+    width: 260px;
+    padding: 14px 16px 16px;
+    background: rgba(250,250,248,0.88);
+    border: 1px solid rgba(26,26,26,0.15);
+    border-radius: 6px;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 11px;
+    color: #1A1A1A;
+    backdrop-filter: blur(6px);
+    display: none;
+    pointer-events: auto;
+  }
+  #panel.open{ display: block; }
+  #panel h3{
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+  #panel label{
+    display: block;
+    margin-top: 9px;
+    color: rgba(26,26,26,0.7);
+  }
+  #panel .row{ display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #panel input[type="range"]{ width: 100%; margin-top: 3px; accent-color: #8B2E2E; }
+  #panel .val{ font-variant-numeric: tabular-nums; color: rgba(26,26,26,0.5); }
+
+  @media (prefers-reduced-motion: reduce){
+    .ch{ transition: opacity 1ms linear, transform 1ms linear, color 1ms linear; }
+    .crack{ transition: stroke-dashoffset 1ms linear, opacity 1ms linear; }
+    #crackSvg{ transition: none; }
+    #glow{ transition: none !important; }
+    #textureReal{ transition: none; }
+    #textureReal.reveal-all{ transition: none; }
+    #inkLineGroup{ transition: none; }
+    #progressLine, #progressFill{ transition: opacity 1ms linear, width 1ms linear; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="glow"></div>
+
+  <div id="textureLayer">
+    <div id="textureBase"></div>
+    <div id="textureReal"></div>
+  </div>
+
+  <div id="heartShadow">
+    <svg viewBox="0 0 24 24">
+      <path fill="#8B2E2E" d="M12,21.35l-1.45-1.32C5.4,15.36,2,12.28,2,8.5 C2,5.42,4.42,3,7.5,3c1.74,0,3.41,0.81,4.5,2.09C13.09,3.81,14.76,3,16.5,3 C19.58,3,22,5.42,22,8.5c0,3.78-3.4,6.86-8.55,11.54L12,21.35z"/>
+    </svg>
+  </div>
+
+  <svg id="inkLineSvg"><g id="inkLineGroup"></g></svg>
+
+  <svg id="crackSvg"></svg>
+
+  <div id="bigTextWrap">
+    <div id="bigText">
+      <div class="big-line" data-text="你想要"></div>
+      <div class="big-line" data-text="怎样活这一生？"></div>
+    </div>
+    <div id="progressLine"><div id="progressFill"></div></div>
+  </div>
+
+  <div id="topText">人不能活一辈子。最后只有两个字——严父，或者慈母。</div>
+  <div id="hint">移动光，照亮每一个字</div>
+</div>
+
+<div id="panel">
+  <h3>调参面板 (d 隐藏)</h3>
+
+  <label>底纹常显 opacity
+    <div class="row"><input type="range" id="p-textureBase" min="0" max="0.15" step="0.005"><span class="val" id="v-textureBase"></span></div>
+  </label>
+  <label>底纹圈内 opacity
+    <div class="row"><input type="range" id="p-textureReal" min="0" max="1" step="0.01"><span class="val" id="v-textureReal"></span></div>
+  </label>
+  <label>裂纹 opacity
+    <div class="row"><input type="range" id="p-crack" min="0" max="0.3" step="0.005"><span class="val" id="v-crack"></span></div>
+  </label>
+  <label>光晕基线 opacity
+    <div class="row"><input type="range" id="p-glow" min="0" max="0.3" step="0.005"><span class="val" id="v-glow"></span></div>
+  </label>
+  <label>心率 bpm
+    <div class="row"><input type="range" id="p-bpm" min="30" max="120" step="1"><span class="val" id="v-bpm"></span></div>
+  </label>
+  <label>光圈半径 px
+    <div class="row"><input type="range" id="p-radius" min="40" max="400" step="5"><span class="val" id="v-radius"></span></div>
+  </label>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============================================================
+     PARAMS —— 所有魔法数字集中在此，调参面板直接读写这个对象
+     ============================================================ */
+  var PARAMS = {
+    textureBaseOpacity: 0.022,   // 底纹常显层 opacity（几乎不可见）
+    textureRealOpacityMax: 0.38, // 底纹真实层在光圈内的 opacity
+    crackOpacityMax: 0.07,       // 冰裂纹画入后的稳态 opacity
+    glowBaseOpacity: 0.06,       // 光晕基线 opacity（心跳时叠加 +0.02）
+    bpm: 54,                     // 心率
+    spotlightRadius: 130,        // 光圈半径 px
+
+    crackHitRadius: 160,         // 光圈经过裂纹质心多少 px 内触发画入
+    crackCount: 120,             // 冰裂纹数量
+    charEnlarge: 1.2,            // 大字命中框放大倍数
+    hintFadeDelay: 8000,         // 提示语自动淡出延时 ms
+    glowBumpPeak: 0.02           // 心跳时光晕 opacity 的峰值增量
+  };
+
+  var REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ============================================================
+     DOM refs
+     ============================================================ */
+  var stage = document.getElementById('stage');
+  var glowEl = document.getElementById('glow');
+  var textureBaseEl = document.getElementById('textureBase');
+  var textureRealEl = document.getElementById('textureReal');
+  var heartEl = document.getElementById('heartShadow');
+  var inkLineGroup = document.getElementById('inkLineGroup');
+  var crackSvg = document.getElementById('crackSvg');
+  var bigTextWrap = document.getElementById('bigTextWrap');
+  var bigTextEl = document.getElementById('bigText');
+  var progressLine = document.getElementById('progressLine');
+  var progressFill = document.getElementById('progressFill');
+  var hintEl = document.getElementById('hint');
+  var panel = document.getElementById('panel');
+
+  var root = document.documentElement;
+
+  /* ============================================================
+     记忆底纹 —— 散布词句
+     ============================================================ */
+  var MEMORY_PHRASES = [
+    "贩卖信息是贬值资产，贩卖视角是升值资产",
+    "框架是梯子，不是牢笼",
+    "没有一个好的钉子，就不要买无数把锤子",
+    "AI 时代最重要的是扎好马步",
+    "用复盘和记录对抗遗忘",
+    "人会消失，字不会",
+    "我缺的不是技能，是让独特性被看见的放大器",
+    "这不是我的简历，是我的思考操作系统",
+    "逻辑、思辨、提问、判断",
+    "营销、审美、决策判断，不可替代",
+    "2,338 篇笔记，308 层目录",
+    "一个月，抖音 0 → 2 万粉",
+    "建造者的证据",
+    "你判断 AI 输出好不好，取决于马步扎得扎不扎实",
+    "我的能力有多少是 AI 给的？",
+    "武林学者",
+    "止损也是能力",
+    "长期资产，活着的数字自我"
+  ];
+
+  function boxesOverlap(a, b, gap){
+    return a.left < b.right + gap && a.right > b.left - gap &&
+           a.top < b.bottom + gap && a.bottom > b.top - gap;
+  }
+
+  function buildTexture(){
+    var w = window.innerWidth, h = window.innerHeight;
+    var GAP = 14;          // 词句间最小间距（>12px 要求）
+    var MAX_TRIES = 60;    // 拒绝采样重试上限，放不下就丢弃该条
+    // 排除区：大字块（中间横带，含进度线）、顶部小字一行
+    var bigTextZone = { left: w*0.08, top: h*0.30, right: w*0.92, bottom: h*0.82 };
+    var topTextZone = { left: 0, top: 0, right: w, bottom: h*0.13 };
+
+    textureBaseEl.innerHTML = '';
+    textureRealEl.innerHTML = '';
+
+    var placed = [];
+
+    for (var i=0;i<MEMORY_PHRASES.length;i++){
+      var text = MEMORY_PHRASES[i];
+      var size = 11 + Math.random()*3;
+      var rotDeg = Math.random()*4 - 2;
+
+      // 先隐身渲染一次，量出真实未旋转尺寸（比估算准，一次性 18 次无感）
+      var base = document.createElement('div');
+      base.className = 'memory-phrase';
+      base.style.cssText = 'left:0;top:0;visibility:hidden;font-size:'+size.toFixed(1)+'px;';
+      base.textContent = text;
+      textureBaseEl.appendChild(base);
+      var mw = base.offsetWidth;
+      var mh = base.offsetHeight;
+
+      // ±2° 旋转会撑大 AABB（长句尤甚：高度 +width*sin2° ≈ 最多 12px），按旋转后 AABB 采样
+      var rad = Math.abs(rotDeg) * Math.PI / 180;
+      var ebw = mw * Math.cos(rad) + mh * Math.sin(rad);
+      var ebh = mw * Math.sin(rad) + mh * Math.cos(rad);
+
+      var box = null;
+      for (var tries=0; tries<MAX_TRIES; tries++){
+        var left = 4 + Math.random() * Math.max(1, w - ebw - 8);
+        var top = 4 + Math.random() * Math.max(1, h - ebh - 8);
+        var cand = { left: left, top: top, right: left + ebw, bottom: top + ebh };
+        if (boxesOverlap(cand, bigTextZone, 0)) continue;
+        if (boxesOverlap(cand, topTextZone, 0)) continue;
+        var collided = false;
+        for (var p=0; p<placed.length; p++){
+          if (boxesOverlap(cand, placed[p], GAP)){ collided = true; break; }
+        }
+        if (!collided){ box = cand; break; }
+      }
+      if (!box){
+        // 拒绝采样失败：丢弃该条，不硬塞
+        textureBaseEl.removeChild(base);
+        continue;
+      }
+
+      placed.push(box);
+
+      // 旋转绕元素中心：未旋转元素 left/top = AABB 左上 + 扩张量的一半（同中心）
+      var elLeft = box.left + (ebw - mw) / 2;
+      var elTop = box.top + (ebh - mh) / 2;
+      var styleStr = 'left:'+elLeft.toFixed(1)+'px;top:'+elTop.toFixed(1)+'px;'+
+                      'transform:rotate('+rotDeg.toFixed(2)+'deg);font-size:'+size.toFixed(1)+'px;';
+
+      base.style.cssText = styleStr;
+
+      var real = document.createElement('div');
+      real.className = 'memory-phrase';
+      real.style.cssText = styleStr;
+      real.textContent = text;
+      textureRealEl.appendChild(real);
+    }
+  }
+
+  /* ============================================================
+     大字：逐字包 span
+     ============================================================ */
+  var chars = []; // { el, rect }
+
+  function buildBigText(){
+    var lines = bigTextEl.querySelectorAll('.big-line');
+    lines.forEach(function(line){
+      var text = line.getAttribute('data-text');
+      line.innerHTML = '';
+      for (var i=0;i<text.length;i++){
+        var span = document.createElement('span');
+        span.className = 'ch';
+        span.textContent = text[i];
+        line.appendChild(span);
+      }
+    });
+  }
+
+  function measureChars(){
+    chars = [];
+    var nodes = bigTextEl.querySelectorAll('.ch');
+    nodes.forEach(function(el){
+      chars.push({ el: el, rect: el.getBoundingClientRect(), lit: el.classList.contains('lit') });
+    });
+    if (progressLine){
+      var wrapRect = bigTextEl.getBoundingClientRect();
+      progressLine.style.width = wrapRect.width + 'px';
+    }
+  }
+
+  var litCount = 0;
+  function lightChar(c){
+    if (c.lit) return;
+    c.lit = true;
+    litCount++;
+    c.el.classList.add('lit');
+    updateProgress();
+    if (litCount === chars.length){
+      onAllLit();
+    }
+  }
+
+  function updateProgress(){
+    var pct = chars.length ? (litCount/chars.length*100) : 0;
+    progressFill.style.width = pct + '%';
+  }
+
+  /* ============================================================
+     心脏影子的位置 & 墨线路径
+     ============================================================ */
+  var inkPathTop = null;   // 心脏 -> 中点
+  var inkPathBottom = null; // 中点 -> 大字块顶部
+  var inkLenTop = 0, inkLenBottom = 0;
+  var inkBroken = false;
+
+  function buildInkLine(){
+    inkLineGroup.innerHTML = '';
+    inkBroken = false;
+
+    var heartRect = heartEl.getBoundingClientRect();
+    var textRect = bigTextWrap.getBoundingClientRect();
+
+    var x1 = heartRect.left + heartRect.width/2;
+    var y1 = heartRect.top + heartRect.height*0.72;
+    var x2 = textRect.left + textRect.width/2;
+    var y2 = textRect.top - 4;
+    var mx = (x1+x2)/2 + (Math.random()*16-8);
+    var my = (y1+y2)/2;
+
+    var dTop = 'M '+x1+' '+y1+' Q '+((x1+mx)/2)+' '+((y1+my)/2)+' '+mx+' '+my;
+    var dBottom = 'M '+x2+' '+y2+' Q '+((x2+mx)/2)+' '+((y2+my)/2)+' '+mx+' '+my;
+
+    inkPathTop = document.createElementNS('http://www.w3.org/2000/svg','path');
+    inkPathTop.setAttribute('d', dTop);
+    inkPathTop.setAttribute('class', 'ink-base');
+    inkLineGroup.appendChild(inkPathTop);
+
+    inkPathBottom = document.createElementNS('http://www.w3.org/2000/svg','path');
+    inkPathBottom.setAttribute('d', dBottom);
+    inkPathBottom.setAttribute('class', 'ink-base');
+    inkLineGroup.appendChild(inkPathBottom);
+
+    inkLenTop = inkPathTop.getTotalLength();
+    inkLenBottom = inkPathBottom.getTotalLength();
+    inkPathTop.style.strokeDasharray = inkLenTop;
+    inkPathTop.style.strokeDashoffset = 0;
+    inkPathBottom.style.strokeDasharray = inkLenBottom;
+    inkPathBottom.style.strokeDashoffset = 0;
+
+    // 用于流动脉冲的可视路径全长（心脏 -> 大字），近似为两段拼接
+    window.__inkFullLen = inkLenTop + inkLenBottom;
+  }
+
+  function pointOnInkPath(t){
+    // t: 0..1，0=心脏端，1=大字端
+    if (t <= 0.5){
+      var lp = inkLenTop * (t/0.5);
+      return inkPathTop.getPointAtLength(lp);
+    } else {
+      var lp2 = inkLenBottom * (1 - (t-0.5)/0.5);
+      return inkPathBottom.getPointAtLength(lp2);
+    }
+  }
+
+  /* ---------- 墨线绷直→绷断（开眼时刻用） ---------- */
+  function breakInkLine(){
+    if (inkBroken) return;
+    inkBroken = true;
+    var retract = 20;
+    // top 段：从末端（靠近中点）回缩
+    var visTop = Math.max(0, inkLenTop - retract);
+    inkPathTop.style.strokeDasharray = visTop + ' ' + (inkLenTop*2+50);
+    inkPathTop.style.strokeDashoffset = 0;
+    // bottom 段：从起点（靠近中点）回缩 —— 反向偏移达成从起点收缩的效果
+    var visBottom = Math.max(0, inkLenBottom - retract);
+    inkPathBottom.style.strokeDasharray = visBottom + ' ' + (inkLenBottom*2+50);
+    inkPathBottom.style.strokeDashoffset = -(retract);
+  }
+
+  /* ============================================================
+     冰裂纹
+     ============================================================ */
+  var cracks = []; // { el, cx, cy, revealed }
+
+  function buildCracks(){
+    crackSvg.innerHTML = '';
+    cracks = [];
+    var w = window.innerWidth, h = window.innerHeight;
+    var n = PARAMS.crackCount;
+
+    for (var i=0;i<n;i++){
+      var segCount = 3 + Math.floor(Math.random()*4); // 3-6
+      var targetLen = 60 + Math.random()*160; // 60-220
+      var avgSeg = targetLen/segCount;
+      var x = Math.random()*w, y = Math.random()*h;
+      var angle = Math.random()*Math.PI*2;
+      var pts = [[x,y]];
+      var sumX = x, sumY = y;
+      for (var s=0;s<segCount;s++){
+        var len = avgSeg * (0.65 + Math.random()*0.7);
+        angle += (Math.random()*1.4 - 0.7); // ±40deg 抖动
+        x += Math.cos(angle)*len;
+        y += Math.sin(angle)*len;
+        pts.push([x,y]);
+        sumX += x; sumY += y;
+      }
+      var cx = sumX/(segCount+1), cy = sumY/(segCount+1);
+
+      var ptsStr = pts.map(function(p){ return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ');
+      var pl = document.createElementNS('http://www.w3.org/2000/svg','polyline');
+      pl.setAttribute('points', ptsStr);
+      pl.setAttribute('class', 'crack');
+      crackSvg.appendChild(pl);
+
+      var len = pl.getTotalLength();
+      pl.style.strokeDasharray = len;
+      pl.style.strokeDashoffset = len;
+
+      cracks.push({ el: pl, cx: cx, cy: cy, len: len, revealed: false });
+    }
+  }
+
+  function revealCrack(c, instant){
+    if (c.revealed) return;
+    c.revealed = true;
+    if (instant || REDUCED_MOTION){
+      c.el.style.transition = 'none';
+    } else {
+      c.el.style.transition = '';
+    }
+    c.el.style.strokeDashoffset = 0;
+    c.el.classList.add('revealed');
+    if (instant || REDUCED_MOTION){
+      // 强制回流后恢复 transition，避免影响后续裂纹
+      void c.el.offsetWidth;
+      c.el.style.transition = '';
+    }
+  }
+
+  /* ============================================================
+     光圈跟随（rAF 节流，CSS 自定义属性驱动，不重排）
+     ============================================================ */
+  var pointerX = window.innerWidth*0.5;
+  var pointerY = window.innerHeight*0.38;
+
+  function onPointerMove(x, y){
+    pointerX = x;
+    pointerY = y;
+  }
+
+  window.addEventListener('mousemove', function(e){
+    onPointerMove(e.clientX, e.clientY);
+  }, { passive: true });
+
+  window.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length){
+      onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchstart', function(e){
+    if (e.touches && e.touches.length){
+      onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: true });
+
+  /* ============================================================
+     心跳时钟（全局统一，rAF 驱动）
+     lub-dub ≈ 54bpm：主搏(0.12s收缩+0.28s回落) → 次搏(弱一半) → 静息
+     ============================================================ */
+  var beatTime = 0;
+  var lastTs = null;
+  var lastCycleFired = -1;
+  var skipRealUntil = 0;
+  var glowBloomActive = false;
+  var glowBaselineRuntime = PARAMS.glowBaseOpacity;
+
+  function cycleLenMs(){ return 60000 / PARAMS.bpm; }
+
+  function heartScaleAt(phase){
+    // 主搏
+    if (phase < 120){
+      var p = phase/120;
+      return 1 + 0.06 * easeOut(p);
+    } else if (phase < 400){
+      var p2 = (phase-120)/280;
+      return 1.06 - 0.06 * easeOut(p2);
+    } else if (phase < 460){
+      return 1;
+    } else if (phase < 520){
+      var p3 = (phase-460)/60;
+      return 1 + 0.03 * easeOut(p3);
+    } else if (phase < 660){
+      var p4 = (phase-520)/140;
+      return 1.03 - 0.03 * easeOut(p4);
+    }
+    return 1;
+  }
+
+  function glowBumpAt(phase){
+    var s = heartScaleAt(phase);
+    // 把心脏 scale 的偏移量（0..0.06）映射到光晕 bump（0..glowBumpPeak）
+    return Math.max(0, (s-1)) / 0.06 * PARAMS.glowBumpPeak;
+  }
+
+  function easeOut(t){ return 1 - Math.pow(1-t, 3); }
+
+  var activePulses = []; // { start, duration }
+
+  function onPrimaryBeatOnset(now){
+    if (inkBroken) return; // 断开后不再有脉冲流动
+    activePulses.push({ start: now, duration: 600 });
+    setTimeout(function(){
+      triggerInkArrival();
+    }, 600);
+  }
+
+  function triggerInkArrival(){
+    var lit = bigTextEl.querySelectorAll('.ch.lit');
+    lit.forEach(function(el){
+      el.classList.add('ink-arrive');
+    });
+    setTimeout(function(){
+      lit.forEach(function(el){ el.classList.remove('ink-arrive'); });
+    }, 300);
+  }
+
+  function updateInkPulses(now){
+    if (!inkPathTop || !inkPathBottom) return;
+    for (var i=activePulses.length-1;i>=0;i--){
+      var p = activePulses[i];
+      var progress = (now - p.start)/p.duration;
+      if (progress >= 1){
+        if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+        activePulses.splice(i,1);
+        continue;
+      }
+      if (!p.el){
+        p.el = document.createElementNS('http://www.w3.org/2000/svg','path');
+        p.el.setAttribute('class','ink-pulse');
+        var full = window.__inkFullLen || 1;
+        var dot = Math.max(10, full*0.06);
+        p.dot = dot;
+        p.el.style.strokeDasharray = dot + ' ' + (full*2);
+        inkLineGroup.appendChild(p.el);
+      }
+      var pt = pointOnInkPath(progress);
+      // 用一小段路径近似“光点”：取 progress 附近的短弧
+      var t0 = Math.max(0, progress-0.02);
+      var pt0 = pointOnInkPath(t0);
+      var d = 'M '+pt0.x+' '+pt0.y+' L '+pt.x+' '+pt.y;
+      p.el.setAttribute('d', d);
+      p.el.style.opacity = (0.85 * (1-Math.abs(progress-0.5)*0.6));
+    }
+  }
+
+  function beatFrame(ts){
+    if (lastTs == null) lastTs = ts;
+    var dt = ts - lastTs;
+    lastTs = ts;
+
+    if (!REDUCED_MOTION){
+      if (ts >= skipRealUntil){
+        beatTime += dt;
+        var Tc = cycleLenMs();
+        var phase = beatTime % Tc;
+        var cycleIndex = Math.floor(beatTime / Tc);
+        if (cycleIndex !== lastCycleFired){
+          lastCycleFired = cycleIndex;
+          onPrimaryBeatOnset(ts);
+        }
+        var s = heartScaleAt(phase);
+        heartEl.style.transform = 'translate(-50%,-50%) scale('+s.toFixed(4)+')';
+        if (!glowBloomActive){
+          var bump = glowBumpAt(phase);
+          glowEl.style.opacity = (glowBaselineRuntime + bump).toFixed(4);
+        }
+      }
+      updateInkPulses(ts);
+    }
+
+    requestAnimationFrame(beatFrame);
+  }
+
+  function triggerBeatSkip(ms){
+    // 心跳漏一拍：强制进入静息相并冻结
+    var Tc = cycleLenMs();
+    var cycleIndex = Math.floor(beatTime / Tc);
+    beatTime = cycleIndex * Tc + Tc * 0.92;
+    heartEl.style.transform = 'translate(-50%,-50%) scale(1)';
+    skipRealUntil = performance.now() + ms;
+  }
+
+  /* ============================================================
+     命中检测（大字 + 裂纹），随光圈移动实时判定
+     ============================================================ */
+  function hitTestFrame(){
+    var r2 = PARAMS.crackHitRadius * PARAMS.crackHitRadius;
+    for (var i=0;i<cracks.length;i++){
+      var c = cracks[i];
+      if (c.revealed) continue;
+      var dx = c.cx - pointerX, dy = c.cy - pointerY;
+      if (dx*dx + dy*dy <= r2){
+        revealCrack(c);
+      }
+    }
+
+    for (var j=0;j<chars.length;j++){
+      var ch = chars[j];
+      if (ch.lit) continue;
+      var rect = ch.rect;
+      var ew = rect.width * PARAMS.charEnlarge;
+      var eh = rect.height * PARAMS.charEnlarge;
+      var cx0 = rect.left + rect.width/2;
+      var cy0 = rect.top + rect.height/2;
+      if (pointerX > cx0-ew/2 && pointerX < cx0+ew/2 && pointerY > cy0-eh/2 && pointerY < cy0+eh/2){
+        lightChar(ch);
+      }
+    }
+  }
+
+  /* ============================================================
+     主循环：更新 --mx/--my（不重排）+ 命中检测
+     ============================================================ */
+  function pointerFrame(){
+    root.style.setProperty('--mx', pointerX.toFixed(1)+'px');
+    root.style.setProperty('--my', pointerY.toFixed(1)+'px');
+    hitTestFrame();
+    requestAnimationFrame(pointerFrame);
+  }
+
+  /* ============================================================
+     开眼时刻编排（约 2.5s）
+     ============================================================ */
+  var kaiyanFired = false;
+
+  function onAllLit(){
+    if (kaiyanFired) return;
+    kaiyanFired = true;
+
+    if (REDUCED_MOTION){
+      // 静态呈现：直接跳到终态
+      cracks.forEach(function(c){ revealCrack(c, true); });
+      crackSvg.classList.add('settled');
+      glowBaselineRuntime = 0.12;
+      glowEl.style.opacity = glowBaselineRuntime.toFixed(4);
+      breakInkLine();
+      setTimeout(function(){ progressLine.style.opacity = '0'; }, 200);
+      return;
+    }
+
+    // 1) 未画入的裂纹全部在 800ms 内画入 + 裂纹层沉降
+    cracks.forEach(function(c){
+      if (!c.revealed){
+        c.el.style.transitionDuration = '800ms';
+        revealCrack(c);
+      }
+    });
+    setTimeout(function(){
+      crackSvg.classList.add('settled');
+    }, 800);
+
+    // 2) 光晕 bloom：0.22 / scale 1.15，1.2s 后缓落到 0.12 稳态
+    glowBloomActive = true;
+    glowEl.style.transition = 'opacity 1200ms cubic-bezier(0.22,1,0.36,1), transform 1200ms cubic-bezier(0.22,1,0.36,1)';
+    glowEl.style.opacity = '0.22';
+    glowEl.style.transform = 'translate(-50%,-50%) scale(1.15)';
+    setTimeout(function(){
+      glowEl.style.transition = 'opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1)';
+      glowEl.style.opacity = '0.12';
+      glowEl.style.transform = 'translate(-50%,-50%) scale(1)';
+      glowBaselineRuntime = 0.12;
+      setTimeout(function(){
+        glowEl.style.transition = '';
+        glowBloomActive = false;
+      }, 520);
+    }, 1200);
+
+    // 3) 底纹真实层整体升到 0.1 可见 800ms 再淡回
+    setTimeout(function(){
+      textureRealEl.classList.add('reveal-all');
+      setTimeout(function(){
+        textureRealEl.classList.remove('reveal-all');
+      }, 800);
+    }, 300);
+
+    // 4) 墨线绷直→绷断，心跳漏一拍
+    setTimeout(function(){
+      inkLineGroup.style.transform = 'scaleY(1.02)';
+      setTimeout(function(){
+        inkLineGroup.style.transform = 'scaleY(1)';
+        breakInkLine();
+        triggerBeatSkip(1400);
+      }, 300);
+    }, 900);
+
+    // 5) 进度线满格后淡出
+    setTimeout(function(){
+      progressLine.style.opacity = '0';
+    }, 1900);
+  }
+
+  /* ============================================================
+     提示语自动淡出
+     ============================================================ */
+  function initHint(){
+    setTimeout(function(){
+      hintEl.classList.add('hidden');
+    }, PARAMS.hintFadeDelay);
+  }
+
+  /* ============================================================
+     调参面板
+     ============================================================ */
+  function initPanel(){
+    var map = [
+      { id: 'p-textureBase', val: 'v-textureBase', key: 'textureBaseOpacity', cssVar: '--texture-base-opacity', decimals: 3 },
+      { id: 'p-textureReal', val: 'v-textureReal', key: 'textureRealOpacityMax', cssVar: '--texture-real-opacity-max', decimals: 2 },
+      { id: 'p-crack', val: 'v-crack', key: 'crackOpacityMax', cssVar: '--crack-opacity-max', decimals: 3 },
+      { id: 'p-glow', val: 'v-glow', key: 'glowBaseOpacity', cssVar: '--glow-base-opacity', decimals: 3 },
+      { id: 'p-bpm', val: 'v-bpm', key: 'bpm', decimals: 0 },
+      { id: 'p-radius', val: 'v-radius', key: 'spotlightRadius', cssVar: '--spotlight-radius', unit: 'px', decimals: 0 }
+    ];
+
+    map.forEach(function(m){
+      var input = document.getElementById(m.id);
+      var out = document.getElementById(m.val);
+      input.value = PARAMS[m.key];
+      out.textContent = Number(PARAMS[m.key]).toFixed(m.decimals);
+      input.addEventListener('input', function(){
+        var v = parseFloat(input.value);
+        PARAMS[m.key] = v;
+        out.textContent = v.toFixed(m.decimals);
+        if (m.key === 'glowBaseOpacity'){
+          glowBaselineRuntime = v;
+        }
+        if (m.cssVar){
+          root.style.setProperty(m.cssVar, v + (m.unit||''));
+        }
+      });
+    });
+
+    window.addEventListener('keydown', function(e){
+      if (e.key === 'd' || e.key === 'D'){
+        panel.classList.toggle('open');
+      }
+    });
+  }
+
+  /* ============================================================
+     resize：重新测量字块 / 重建墨线锚点 / 重建裂纹
+     ============================================================ */
+  var resizeTimer = null;
+  function onResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      measureChars();
+      buildInkLine();
+      if (!kaiyanFired){
+        buildCracks();
+      }
+    }, 200);
+  }
+  window.addEventListener('resize', onResize);
+
+  /* ============================================================
+     init
+     ============================================================ */
+  function init(){
+    root.style.setProperty('--texture-base-opacity', PARAMS.textureBaseOpacity);
+    root.style.setProperty('--texture-real-opacity-max', PARAMS.textureRealOpacityMax);
+    root.style.setProperty('--crack-opacity-max', PARAMS.crackOpacityMax);
+    root.style.setProperty('--glow-base-opacity', PARAMS.glowBaseOpacity);
+    root.style.setProperty('--spotlight-radius', PARAMS.spotlightRadius+'px');
+    root.style.setProperty('--mx', pointerX+'px');
+    root.style.setProperty('--my', pointerY+'px');
+
+    buildTexture();
+    buildBigText();
+    measureChars();
+    buildInkLine();
+    buildCracks();
+    initHint();
+    initPanel();
+
+    if (REDUCED_MOTION){
+      heartEl.style.transform = 'translate(-50%,-50%) scale(1)';
+      glowEl.style.opacity = PARAMS.glowBaseOpacity;
+    } else {
+      requestAnimationFrame(beatFrame);
+    }
+    requestAnimationFrame(pointerFrame);
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
