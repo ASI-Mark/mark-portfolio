@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# demo 大图不进仓库（正式素材已压缩进 public/kaiyan/）
+demos/**/*.png
