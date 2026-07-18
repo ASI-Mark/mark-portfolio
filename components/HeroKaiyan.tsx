@@ -61,6 +61,12 @@ interface PhraseSpan {
   amp: number;
   speed: number;
   rot: number;
+  // 手写题记的"不齐"：每字稳定的字号/位移/旋转/墨色抖动
+  jScale: number;
+  jDx: number;
+  jDy: number;
+  jRot: number;
+  jInk: number;
 }
 
 const MEMORY_PHRASES = [
@@ -116,6 +122,9 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
   const corruptCanvasRef = useRef<HTMLCanvasElement>(null);
   const beatLayerRef = useRef<HTMLDivElement>(null);
   const bigQuestionRef = useRef<HTMLDivElement>(null);
+  const sealRef = useRef<HTMLDivElement>(null);
+  const wingLRef = useRef<HTMLCanvasElement>(null);
+  const wingRRef = useRef<HTMLCanvasElement>(null);
   const corruptCanvasBeatRef = useRef<HTMLCanvasElement>(null);
   const phraseLayerRef = useRef<HTMLDivElement>(null);
   const veilRef = useRef<HTMLDivElement>(null);
@@ -144,6 +153,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     const beatLayerEl = beatLayerRef.current;
     const corruptCanvasBeat = corruptCanvasBeatRef.current;
     const phraseLayerEl = phraseLayerRef.current;
+    const sealEl = sealRef.current;
     const veilEl = veilRef.current;
     const fxCanvas = fxCanvasRef.current;
     const fireCursorEl = fireCursorRef.current;
@@ -199,6 +209,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       restBpmBonusPerHand: 6,
       idleSampleMs: 500,
       parallaxStrength: 1,
+      wingAmp: 1,
     };
 
     let parX = 0;
@@ -210,6 +221,70 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     const ctx = corruptCanvas.getContext("2d", { willReadFrequently: true });
     const beatCtx = corruptCanvasBeat.getContext("2d");
     if (!ctx || !beatCtx) return;
+
+    // ---- 翅膀扇动：复合画面(当前屏幕态) → 各翼遮罩片 → 翅根为轴摆动 ----
+    const wingL = wingLRef.current;
+    const wingR = wingRRef.current;
+    const wingLCtx = wingL?.getContext("2d") ?? null;
+    const wingRCtx = wingR?.getContext("2d") ?? null;
+    const wingsOn = !REDUCED_MOTION && !!(wingL && wingR && wingLCtx && wingRCtx);
+
+    // 一次性构建左右翼软边遮罩（椭圆近似，参照 heart-corrupted.jpg 目测）
+    function buildWingMask(side: "L" | "R"): HTMLCanvasElement {
+      const m = document.createElement("canvas");
+      m.width = IMG_W;
+      m.height = IMG_H;
+      const mc = m.getContext("2d")!;
+      mc.fillStyle = "#000";
+      mc.filter = "blur(34px)";
+      // 归一化椭圆（避开中央 0.36~0.66 的心脏/手区）
+      const ells =
+        side === "L"
+          ? [
+              [0.22, 0.34, 0.2, 0.2],
+              [0.19, 0.52, 0.22, 0.26],
+              [0.25, 0.66, 0.16, 0.16],
+            ]
+          : [
+              [0.78, 0.34, 0.2, 0.2],
+              [0.81, 0.52, 0.22, 0.26],
+              [0.75, 0.66, 0.16, 0.16],
+            ];
+      ells.forEach(([cx, cy, rx, ry]) => {
+        mc.beginPath();
+        mc.ellipse(cx * IMG_W, cy * IMG_H, rx * IMG_W, ry * IMG_H, 0, 0, Math.PI * 2);
+        mc.fill();
+      });
+      return m;
+    }
+    const wingMaskL = wingsOn ? buildWingMask("L") : null;
+    const wingMaskR = wingsOn ? buildWingMask("R") : null;
+    // 复合缓冲：屏幕当前态 = healed 垫底 + corrupt 覆盖（corrupt 擦除处透出 healed）
+    const compCanvas = document.createElement("canvas");
+    compCanvas.width = IMG_W;
+    compCanvas.height = IMG_H;
+    const compCtx = compCanvas.getContext("2d");
+
+    function rebuildWings() {
+      if (!wingsOn || !compCtx) return;
+      const healedEl = healedImgRef.current;
+      if (!healedEl || !healedEl.naturalWidth) return;
+      compCtx.globalCompositeOperation = "source-over";
+      compCtx.clearRect(0, 0, IMG_W, IMG_H);
+      compCtx.drawImage(healedEl, 0, 0, IMG_W, IMG_H);
+      compCtx.drawImage(corruptCanvas!, 0, 0);
+      for (const [wc, mask] of [
+        [wingLCtx!, wingMaskL!],
+        [wingRCtx!, wingMaskR!],
+      ] as const) {
+        wc.globalCompositeOperation = "source-over";
+        wc.clearRect(0, 0, IMG_W, IMG_H);
+        wc.drawImage(compCanvas, 0, 0);
+        wc.globalCompositeOperation = "destination-in";
+        wc.drawImage(mask, 0, 0);
+        wc.globalCompositeOperation = "source-over";
+      }
+    }
 
     let beatDirty = true;
     let finaleFullBeat = false;
@@ -589,6 +664,11 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           amp: 6 + Math.random() * 4,
           speed: 0.0012 + Math.random() * 0.0009,
           rot: 0,
+          jScale: 0.93 + Math.random() * 0.14, // 字号 ±7%
+          jDx: (Math.random() - 0.5) * 3, // 水平 ±1.5px
+          jDy: (Math.random() - 0.5) * 2, // 基线 ±1px
+          jRot: (Math.random() - 0.5) * 3.2, // 字身 ±1.6°
+          jInk: 0.78 + Math.random() * 0.17, // 墨色浓淡
         });
       }
     }
@@ -612,24 +692,39 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         const col = Math.floor(local / 5); // 0=先读列, 1=后读列
         const k = local % 5;
         const x =
-          side === "R" ? rightOuterX - col * colGap : leftOuterX + col * colGap;
-        const y = topY + k * stepY;
-        p.rot = 0;
+          (side === "R" ? rightOuterX - col * colGap : leftOuterX + col * colGap) +
+          p.jDx;
+        const y = topY + k * stepY + p.jDy;
+        p.rot = p.jRot;
         p.baseX = x;
         p.baseY = y;
-        p.el.style.fontSize = fontPx.toFixed(1) + "px";
+        p.el.style.fontSize = (fontPx * p.jScale).toFixed(1) + "px";
+        p.el.style.opacity = String(p.jInk);
         p.el.style.left = x.toFixed(1) + "px";
         p.el.style.top = y.toFixed(1) + "px";
       });
+
+      // 落款朱砂印：左侧后读列末字下方
+      if (sealEl) {
+        const sealSize = fontPx * 1.55;
+        const lastLocal = 4;
+        const sealX = leftOuterX + 1 * colGap - sealSize * 0.15;
+        const sealY = topY + lastLocal * stepY + stepY * 0.95;
+        sealEl.style.width = sealSize.toFixed(1) + "px";
+        sealEl.style.height = sealSize.toFixed(1) + "px";
+        sealEl.style.fontSize = (sealSize * 0.62).toFixed(1) + "px";
+        sealEl.style.left = sealX.toFixed(1) + "px";
+        sealEl.style.top = sealY.toFixed(1) + "px";
+      }
     }
 
     function updatePhraseFloat(ts: number) {
-      // 批注是"写上去"的：只保留极轻微的纸面起伏（±1.5px），不漂浮
+      // 批注是"写上去"的：只保留极轻微的纸面起伏（±1.2px）+ 每字固定微转
       for (let i = 0; i < phraseSpans.length; i++) {
         const p = phraseSpans[i];
         if (p.el.classList.contains("gone")) continue;
-        const off = Math.sin(ts * p.speed + p.phase) * 1.5;
-        p.el.style.transform = `translateY(${off.toFixed(1)}px)`;
+        const off = Math.sin(ts * p.speed + p.phase) * 1.2;
+        p.el.style.transform = `translateY(${off.toFixed(1)}px) rotate(${p.jRot.toFixed(2)}deg)`;
       }
     }
 
@@ -645,6 +740,9 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         }, i * 45);
       });
 
+      // 印最后揭走：批注烧退后再隔 200ms
+      setT(() => sealEl?.classList.add("ky-seal-gone"), phraseSpans.length * 45 + 200);
+
       const fadeOutMs = phraseSpans.length * 45 + 460;
       setT(() => {
         phraseSpans.forEach((p) => p.el.classList.add("gone"));
@@ -655,6 +753,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     function resetPhraseCloud() {
       morphed = false;
       bigQuestionRef.current?.classList.remove("ky-show");
+      sealEl?.classList.remove("ky-seal-gone");
       phraseSpans.forEach((p, i) => {
         p.el.textContent = PHRASE_OLD[i];
         p.el.classList.remove("fading");
@@ -985,7 +1084,21 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         if (!finaleFired) sampleProgress();
       }
 
-      if (beatDirty) syncBeatCanvas();
+      if (beatDirty) {
+        syncBeatCanvas();
+        rebuildWings();
+      }
+
+      // 翅膀扇动：被缚仅微颤(挣扎)，随治愈进度放大到自由扇动
+      if (wingsOn) {
+        const p = finaleFullBeat ? 1 : overallErasedFraction;
+        const ampDeg = (0.3 + p * 1.9) * PARAMS.wingAmp;
+        const omega = 0.006 - p * 0.0046; // 束缚快而弱 → 自由慢而阔
+        const a = ampDeg * Math.sin(ts * omega);
+        const sx = 1 + Math.max(0, a) * 0.004;
+        wingL!.style.transform = `rotate(${a.toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
+        wingR!.style.transform = `rotate(${(-a).toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
+      }
 
       if (ts >= pauseBeatUntil) {
         beatTime += dt;
@@ -1103,6 +1216,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         },
         { id: "ky-p-healThreshold", val: "ky-v-healThreshold", key: "healThresholdPct", decimals: 0 },
         { id: "ky-p-parallax", val: "ky-v-parallax", key: "parallaxStrength", decimals: 1 },
+        { id: "ky-p-wingAmp", val: "ky-v-wingAmp", key: "wingAmp", decimals: 1 },
       ];
 
       const inputHandlers: { input: HTMLInputElement; handler: () => void }[] = [];
@@ -1237,6 +1351,9 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
               draggable={false}
             />
             <canvas id="ky-corruptCanvas" ref={corruptCanvasRef} className="ky-corruptCanvas" width={IMG_W} height={IMG_H} />
+            {/* 扇动翅膀：各切一片当前复合画面，翅根为轴摆动，盖住底下静态翅膀 */}
+            <canvas id="ky-wingL" ref={wingLRef} className="ky-wing ky-wingL" width={IMG_W} height={IMG_H} />
+            <canvas id="ky-wingR" ref={wingRRef} className="ky-wing ky-wingR" width={IMG_W} height={IMG_H} />
             <div id="ky-beatLayer" ref={beatLayerRef} className="ky-beatLayer">
               {/* 搏动层只有一张画布：治愈图∩已擦除区（见 syncBeatCanvas） */}
               <canvas
@@ -1251,6 +1368,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         </div>
 
         <div id="ky-phraseLayer" ref={phraseLayerRef} className="ky-phraseLayer" />
+        <div ref={sealRef} className="ky-seal" aria-hidden="true">馬</div>
 
         <div ref={bigQuestionRef} className="ky-bigQuestion" aria-hidden="true">
           <div className="ky-bigQuestion-line">你想要</div>
@@ -1348,6 +1466,13 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           <div className="ky-row">
             <input type="range" id="ky-p-parallax" min={0} max={2} step={0.1} />
             <span className="ky-val" id="ky-v-parallax" />
+          </div>
+        </label>
+        <label>
+          翅膀幅度
+          <div className="ky-row">
+            <input type="range" id="ky-p-wingAmp" min={0} max={3} step={0.1} />
+            <span className="ky-val" id="ky-v-wingAmp" />
           </div>
         </label>
       </div>
@@ -1459,6 +1584,23 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           cursor: pointer;
         }
 
+        /* 扇动翼片：翅根为轴、常态微放大盖住底下静态翅膀防双影 */
+        .ky-wing {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+          -webkit-user-drag: none;
+          will-change: transform;
+        }
+        .ky-wingL {
+          transform-origin: 60% 47%;
+        }
+        .ky-wingR {
+          transform-origin: 40% 47%;
+        }
+
         .ky-beatLayer {
           position: absolute;
           inset: 0;
@@ -1496,6 +1638,31 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           opacity: 0;
           filter: blur(4px);
           pointer-events: none;
+        }
+
+        /* 落款朱砂印：白字暗红底、微斜、multiply 压进纸 */
+        .ky-seal {
+          position: absolute;
+          z-index: 4;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #f5efe6;
+          background: var(--color-accent);
+          border-radius: 14%;
+          font-weight: 700;
+          line-height: 1;
+          mix-blend-mode: multiply;
+          opacity: 0.8;
+          transform: rotate(-3deg);
+          box-shadow: inset 0 0 0 1.5px rgba(245, 239, 230, 0.35);
+          transition: opacity 400ms cubic-bezier(0.22, 1, 0.36, 1), filter 400ms cubic-bezier(0.22, 1, 0.36, 1);
+          pointer-events: none;
+          will-change: opacity;
+        }
+        .ky-seal.ky-seal-gone {
+          opacity: 0;
+          filter: blur(3px);
         }
 
         /* 终幕大字：恢复原 Hero 的居中大字排版——批注是古书上的旧剧本，
