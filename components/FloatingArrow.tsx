@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const SECTIONS = ["works", "beliefs", "mind", "timeline", "map", "recent", "guestbook"];
+const SECTIONS = ["works", "creations", "beliefs", "mind", "timeline", "map", "recent", "guestbook"];
 
 export default function FloatingArrow() {
   const [nextSection, setNextSection] = useState<string | null>("works");
