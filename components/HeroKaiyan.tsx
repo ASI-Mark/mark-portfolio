@@ -115,7 +115,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
   const healedImgRef = useRef<HTMLImageElement>(null);
   const corruptCanvasRef = useRef<HTMLCanvasElement>(null);
   const beatLayerRef = useRef<HTMLDivElement>(null);
-  const healedImgBeatRef = useRef<HTMLImageElement>(null);
+  const bigQuestionRef = useRef<HTMLDivElement>(null);
   const corruptCanvasBeatRef = useRef<HTMLCanvasElement>(null);
   const phraseLayerRef = useRef<HTMLDivElement>(null);
   const veilRef = useRef<HTMLDivElement>(null);
@@ -212,9 +212,20 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     if (!ctx || !beatCtx) return;
 
     let beatDirty = true;
+    let finaleFullBeat = false;
     function syncBeatCanvas() {
+      // 挣脱感的关键：黑壳与手是"死"的（永不搏动），搏动层只画
+      // 「治愈图 ∩ 已擦除区域」——被火种照活的血肉在钳制下跳动，
+      // 擦得越多，活的部分越大，直到终幕整颗心自由搏动。
+      const healedEl = healedImgRef.current;
+      if (!healedEl || !healedEl.naturalWidth) return;
       beatCtx!.clearRect(0, 0, corruptCanvasBeat!.width, corruptCanvasBeat!.height);
-      beatCtx!.drawImage(corruptCanvas!, 0, 0);
+      beatCtx!.drawImage(healedEl, 0, 0, corruptCanvasBeat!.width, corruptCanvasBeat!.height);
+      if (!finaleFullBeat) {
+        beatCtx!.globalCompositeOperation = "destination-out";
+        beatCtx!.drawImage(corruptCanvas!, 0, 0);
+        beatCtx!.globalCompositeOperation = "source-over";
+      }
       beatDirty = false;
     }
     function setBeatTransform(str: string, transition?: string) {
@@ -583,37 +594,42 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     }
 
     function layoutPhraseCloud() {
+      // 古图谱批注体：句子竖排两列写在画面顶部两角的羊皮纸上（先右后左，
+      // 古籍读序），multiply 融进纸面——文字属于画，不浮在画上。
       const r = heartStageEl!.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const narrow = vw < 600;
-      const visible = phraseSpans.filter((p) => !p.el.classList.contains("gone"));
-      const n = Math.max(2, visible.length);
-      const xStart = r.left - r.width * (narrow ? 0.04 : 0.17);
-      const xEnd = r.right + r.width * (narrow ? 0.04 : 0.17);
-      const yBase = narrow ? 0.63 : 0.6;
-      const yDip = narrow ? 0.15 : 0.17;
+      const fontPx = Math.max(12, Math.min(22, r.width * 0.038));
+      const stepY = fontPx * 1.28;
+      const colGap = fontPx * 1.6;
+      const topY = r.top + r.height * 0.035;
+      // 每边两短列（5 字/列），古籍题跋式，全部落在顶部亮纸区；
+      // 右侧先读且列序右→左（古序），左侧续读同理
+      const rightOuterX = r.left + r.width * 0.925 - fontPx / 2;
+      const leftOuterX = r.left + r.width * 0.075 - fontPx / 2;
 
-      visible.forEach((p, k) => {
-        const t = k / (n - 1);
-        let x = xStart + t * (xEnd - xStart);
-        const y = r.top + r.height * (yBase + yDip * Math.sin(t * Math.PI));
-        x = Math.max(10, Math.min(vw - 26, x));
-        const slope = ((yDip * Math.PI * Math.cos(t * Math.PI) * r.height) / (xEnd - xStart));
-        const rot = (Math.atan(slope) * 180) / Math.PI;
-        p.rot = Math.max(-18, Math.min(18, rot));
+      phraseSpans.forEach((p) => {
+        const side = p.idx < 10 ? "R" : "L";
+        const local = p.idx % 10;
+        const col = Math.floor(local / 5); // 0=先读列, 1=后读列
+        const k = local % 5;
+        const x =
+          side === "R" ? rightOuterX - col * colGap : leftOuterX + col * colGap;
+        const y = topY + k * stepY;
+        p.rot = 0;
         p.baseX = x;
         p.baseY = y;
+        p.el.style.fontSize = fontPx.toFixed(1) + "px";
         p.el.style.left = x.toFixed(1) + "px";
         p.el.style.top = y.toFixed(1) + "px";
       });
     }
 
     function updatePhraseFloat(ts: number) {
+      // 批注是"写上去"的：只保留极轻微的纸面起伏（±1.5px），不漂浮
       for (let i = 0; i < phraseSpans.length; i++) {
         const p = phraseSpans[i];
         if (p.el.classList.contains("gone")) continue;
-        const off = Math.sin(ts * p.speed + p.phase) * p.amp;
-        p.el.style.transform = `translateY(${off.toFixed(1)}px) rotate(${(p.rot || 0).toFixed(1)}deg)`;
+        const off = Math.sin(ts * p.speed + p.phase) * 1.5;
+        p.el.style.transform = `translateY(${off.toFixed(1)}px)`;
       }
     }
 
@@ -622,6 +638,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       if (morphed) return;
       morphed = true;
 
+      // 古批注（旧剧本）逐字烧退，随后活的问题以大字立在光里
       phraseSpans.forEach((p, i) => {
         setT(() => {
           p.el.classList.add("fading");
@@ -629,30 +646,15 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       });
 
       const fadeOutMs = phraseSpans.length * 45 + 460;
-
       setT(() => {
-        phraseSpans.forEach((p) => {
-          if (p.idx >= PHRASE_NEW.length) {
-            p.el.classList.add("gone");
-          }
-        });
-        layoutPhraseCloud();
-
-        for (let i = 0; i < PHRASE_NEW.length && i < phraseSpans.length; i++) {
-          const p = phraseSpans[i];
-          const newIdx = i;
-          setT(() => {
-            p.el.textContent = PHRASE_NEW[newIdx] || "";
-            p.el.classList.remove("fading");
-            p.el.classList.remove("gone");
-            void p.el.offsetWidth;
-          }, newIdx * 70);
-        }
+        phraseSpans.forEach((p) => p.el.classList.add("gone"));
+        bigQuestionRef.current?.classList.add("ky-show");
       }, fadeOutMs);
     }
 
     function resetPhraseCloud() {
       morphed = false;
+      bigQuestionRef.current?.classList.remove("ky-show");
       phraseSpans.forEach((p, i) => {
         p.el.textContent = PHRASE_OLD[i];
         p.el.classList.remove("fading");
@@ -716,28 +718,21 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
 
       if (REDUCED_MOTION) {
         corruptCanvas!.style.display = "none";
-        resetPhraseCloud();
-        phraseSpans.forEach((p) => {
-          if (p.idx < PHRASE_NEW.length) {
-            p.el.textContent = PHRASE_NEW[p.idx] || "";
-          } else {
-            p.el.classList.add("gone");
-          }
-        });
-        layoutPhraseCloud();
+        phraseSpans.forEach((p) => p.el.classList.add("gone"));
+        bigQuestionRef.current?.classList.add("ky-show");
         actOneFinished = true;
         return;
       }
 
       corruptCanvas!.style.transition = "opacity 700ms cubic-bezier(0.22,1,0.36,1)";
-      corruptCanvasBeat!.style.transition = "opacity 700ms cubic-bezier(0.22,1,0.36,1)";
       requestAnimationFrame(() => {
         corruptCanvas!.style.opacity = "0";
-        corruptCanvasBeat!.style.opacity = "0";
       });
       setT(() => {
         corruptCanvas!.style.display = "none";
-        corruptCanvasBeat!.style.display = "none";
+        // 黑壳彻底退场后，搏动层升级为完整心脏——自由搏动
+        finaleFullBeat = true;
+        beatDirty = true;
       }, 720);
 
       pauseBeatUntil = Infinity;
@@ -755,7 +750,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         morphPhrase();
       }, 700);
 
-      const morphMs = PHRASE_OLD.length * 45 + 460 + 5 * 70 + 500;
+      const morphMs = PHRASE_OLD.length * 45 + 460 + 950;
       setT(() => {
         if (actOneFinished) return;
         actOneFinished = true;
@@ -1019,7 +1014,10 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         parY += (tny - parY) * Math.min(1, dt * 0.004);
         sceneEl!.style.transform = `rotateX(${(-parY * 2.2 * pk).toFixed(3)}deg) rotateY(${(parX * 2.2 * pk).toFixed(3)}deg)`;
         textureLayerEl!.style.transform = `translate(${(-parX * 8 * pk).toFixed(1)}px,${(-parY * 8 * pk).toFixed(1)}px)`;
-        phraseLayerEl!.style.transform = `translate(${(parX * 14 * pk).toFixed(1)}px,${(parY * 14 * pk).toFixed(1)}px)`;
+        // 批注层与画同体（不做独立视差）；终幕大字是"活字"，走近景层
+        if (bigQuestionRef.current) {
+          bigQuestionRef.current.style.translate = `${(parX * 14 * pk).toFixed(1)}px ${(parY * 14 * pk).toFixed(1)}px`;
+        }
       }
     }
 
@@ -1240,15 +1238,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
             />
             <canvas id="ky-corruptCanvas" ref={corruptCanvasRef} className="ky-corruptCanvas" width={IMG_W} height={IMG_H} />
             <div id="ky-beatLayer" ref={beatLayerRef} className="ky-beatLayer">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                id="ky-healedImgBeat"
-                ref={healedImgBeatRef}
-                className="ky-healedImgBeat"
-                src="/kaiyan/heart-healed.jpg"
-                alt=""
-                draggable={false}
-              />
+              {/* 搏动层只有一张画布：治愈图∩已擦除区（见 syncBeatCanvas） */}
               <canvas
                 id="ky-corruptCanvasBeat"
                 ref={corruptCanvasBeatRef}
@@ -1261,6 +1251,11 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         </div>
 
         <div id="ky-phraseLayer" ref={phraseLayerRef} className="ky-phraseLayer" />
+
+        <div ref={bigQuestionRef} className="ky-bigQuestion" aria-hidden="true">
+          <div className="ky-bigQuestion-line">你想要</div>
+          <div className="ky-bigQuestion-line">怎样活这一生？</div>
+        </div>
       </div>
 
       <div id="ky-veil" ref={veilRef} className="ky-veil" />
@@ -1444,7 +1439,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         }
         .ky-healedImg,
         .ky-corruptCanvas,
-        .ky-healedImgBeat,
         .ky-corruptCanvasBeat {
           position: absolute;
           inset: 0;
@@ -1453,8 +1447,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           -webkit-user-drag: none;
           pointer-events: none;
         }
-        .ky-healedImg,
-        .ky-healedImgBeat {
+        .ky-healedImg {
           object-fit: fill;
         }
         .ky-corruptCanvas,
@@ -1484,13 +1477,12 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         .ky-phrase-ch {
           position: absolute;
           display: inline-block;
-          color: var(--color-ink);
-          font-size: clamp(15px, 2.1vw, 21px);
+          /* 古图谱批注体：偏褐墨色 + multiply 融进羊皮纸，字是画的一部分 */
+          color: rgba(48, 36, 24, 0.88);
+          mix-blend-mode: multiply;
           font-weight: 500;
           line-height: 1;
-          text-shadow: 0 0 7px rgba(250, 250, 248, 0.9), 0 0 14px rgba(250, 250, 248, 0.5), 0.4px 0.6px 0 rgba(26, 26, 26, 0.85),
-            0.8px 1.2px 0 rgba(26, 26, 26, 0.76), 1.2px 1.8px 0 rgba(26, 26, 26, 0.66), 1.6px 2.4px 0 rgba(26, 26, 26, 0.56),
-            2px 3px 0 rgba(26, 26, 26, 0.46), 2.4px 3.6px 0 rgba(26, 26, 26, 0.36), 2.8px 4.2px 1px rgba(26, 26, 26, 0.22);
+          text-shadow: 0.5px 0.8px 1px rgba(26, 26, 26, 0.2);
           opacity: 1;
           filter: blur(0);
           transition: opacity 450ms cubic-bezier(0.22, 1, 0.36, 1), filter 450ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -1504,6 +1496,52 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           opacity: 0;
           filter: blur(4px);
           pointer-events: none;
+        }
+
+        /* 终幕大字：恢复原 Hero 的居中大字排版——批注是古书上的旧剧本，
+           这两行是活着的问题。软纸光晕保证压在画上也清晰。 */
+        .ky-bigQuestion {
+          position: fixed;
+          left: 50%;
+          top: 47vh;
+          transform: translateX(-50%);
+          z-index: 30;
+          text-align: center;
+          pointer-events: none;
+          padding: 4vh 7vw;
+          background: radial-gradient(
+            ellipse 100% 100% at 50% 50%,
+            rgba(250, 250, 248, 0.88) 0%,
+            rgba(250, 250, 248, 0.55) 62%,
+            rgba(250, 250, 248, 0) 100%
+          );
+          /* 未触发时整个容器（含纸光晕底）不可见，否则光晕会提前渗到画上 */
+          opacity: 0;
+          visibility: hidden;
+          transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 700ms;
+        }
+        .ky-bigQuestion.ky-show {
+          opacity: 1;
+          visibility: visible;
+          transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s;
+        }
+        .ky-bigQuestion-line {
+          font-size: clamp(38px, 7.6vw, 76px);
+          font-weight: 500;
+          letter-spacing: 0.06em;
+          line-height: 1.34;
+          white-space: nowrap;
+          color: var(--color-ink);
+          opacity: 0;
+          filter: blur(6px);
+          transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1), filter 700ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .ky-bigQuestion-line:nth-child(2) {
+          transition-delay: 260ms;
+        }
+        .ky-bigQuestion.ky-show .ky-bigQuestion-line {
+          opacity: 1;
+          filter: blur(0);
         }
 
         .ky-veil {
