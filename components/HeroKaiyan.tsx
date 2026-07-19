@@ -52,23 +52,6 @@ interface Ash {
   color: string;
 }
 
-interface PhraseSpan {
-  el: HTMLSpanElement;
-  idx: number;
-  baseX: number;
-  baseY: number;
-  phase: number;
-  amp: number;
-  speed: number;
-  rot: number;
-  // 手写题记的"不齐"：每字稳定的字号/位移/旋转/墨色抖动
-  jScale: number;
-  jDx: number;
-  jDy: number;
-  jRot: number;
-  jInk: number;
-}
-
 const MEMORY_PHRASES = [
   "贩卖信息是贬值资产，贩卖视角是升值资产",
   "框架是梯子，不是牢笼",
@@ -122,11 +105,9 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
   const corruptCanvasRef = useRef<HTMLCanvasElement>(null);
   const beatLayerRef = useRef<HTMLDivElement>(null);
   const bigQuestionRef = useRef<HTMLDivElement>(null);
-  const sealRef = useRef<HTMLDivElement>(null);
   const wingLRef = useRef<HTMLCanvasElement>(null);
   const wingRRef = useRef<HTMLCanvasElement>(null);
   const corruptCanvasBeatRef = useRef<HTMLCanvasElement>(null);
-  const phraseLayerRef = useRef<HTMLDivElement>(null);
   const veilRef = useRef<HTMLDivElement>(null);
   const fxCanvasRef = useRef<HTMLCanvasElement>(null);
   const fireCursorRef = useRef<HTMLDivElement>(null);
@@ -152,8 +133,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     const corruptCanvas = corruptCanvasRef.current;
     const beatLayerEl = beatLayerRef.current;
     const corruptCanvasBeat = corruptCanvasBeatRef.current;
-    const phraseLayerEl = phraseLayerRef.current;
-    const sealEl = sealRef.current;
     const veilEl = veilRef.current;
     const fxCanvas = fxCanvasRef.current;
     const fireCursorEl = fireCursorRef.current;
@@ -170,7 +149,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     if (
       !root || !stageWarmthEl || !textureLayerEl || !textureBaseEl || !textureRealEl ||
       !sceneEl || !heartStageEl || !heartWrapEl || !corruptCanvas || !beatLayerEl ||
-      !corruptCanvasBeat || !phraseLayerEl || !veilEl || !fxCanvas || !fireCursorEl ||
+      !corruptCanvasBeat || !veilEl || !fxCanvas || !fireCursorEl ||
       !flameOuterEl || !flameCoreEl || !hintEl || !skipLinkEl || !eyelidTop ||
       !eyelidBottom || !panel || !panelToggleBtn || !corruptedSrcImg
     ) {
@@ -643,122 +622,19 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     }
 
     // ============================================================
-    // Floating phrase cloud
+    // 题字（已画进堕落态画布 paintInscription，不再有 DOM 字层）
     // ============================================================
-    let phraseSpans: PhraseSpan[] = [];
-
-    function buildPhraseCloud() {
-      phraseLayerEl!.innerHTML = "";
-      phraseSpans = [];
-      for (let i = 0; i < PHRASE_OLD.length; i++) {
-        const span = document.createElement("span");
-        span.className = "ky-phrase-ch";
-        span.textContent = PHRASE_OLD[i];
-        phraseLayerEl!.appendChild(span);
-        phraseSpans.push({
-          el: span,
-          idx: i,
-          baseX: 0,
-          baseY: 0,
-          phase: Math.random() * Math.PI * 2,
-          amp: 6 + Math.random() * 4,
-          speed: 0.0012 + Math.random() * 0.0009,
-          rot: 0,
-          jScale: 0.93 + Math.random() * 0.14, // 字号 ±7%
-          jDx: (Math.random() - 0.5) * 3, // 水平 ±1.5px
-          jDy: (Math.random() - 0.5) * 2, // 基线 ±1px
-          jRot: (Math.random() - 0.5) * 3.2, // 字身 ±1.6°
-          jInk: 0.78 + Math.random() * 0.17, // 墨色浓淡
-        });
-      }
-    }
-
-    function layoutPhraseCloud() {
-      // 古图谱批注体：句子竖排两列写在画面顶部两角的羊皮纸上（先右后左，
-      // 古籍读序），multiply 融进纸面——文字属于画，不浮在画上。
-      const r = heartStageEl!.getBoundingClientRect();
-      const fontPx = Math.max(12, Math.min(22, r.width * 0.038));
-      const stepY = fontPx * 1.28;
-      const colGap = fontPx * 1.6;
-      const topY = r.top + r.height * 0.035;
-      // 每边两短列（5 字/列），古籍题跋式，全部落在顶部亮纸区；
-      // 右侧先读且列序右→左（古序），左侧续读同理
-      const rightOuterX = r.left + r.width * 0.925 - fontPx / 2;
-      const leftOuterX = r.left + r.width * 0.075 - fontPx / 2;
-
-      phraseSpans.forEach((p) => {
-        const side = p.idx < 10 ? "R" : "L";
-        const local = p.idx % 10;
-        const col = Math.floor(local / 5); // 0=先读列, 1=后读列
-        const k = local % 5;
-        const x =
-          (side === "R" ? rightOuterX - col * colGap : leftOuterX + col * colGap) +
-          p.jDx;
-        const y = topY + k * stepY + p.jDy;
-        p.rot = p.jRot;
-        p.baseX = x;
-        p.baseY = y;
-        p.el.style.fontSize = (fontPx * p.jScale).toFixed(1) + "px";
-        p.el.style.opacity = String(p.jInk);
-        p.el.style.left = x.toFixed(1) + "px";
-        p.el.style.top = y.toFixed(1) + "px";
-      });
-
-      // 落款朱砂印：左侧后读列末字下方
-      if (sealEl) {
-        const sealSize = fontPx * 1.55;
-        const lastLocal = 4;
-        const sealX = leftOuterX + 1 * colGap - sealSize * 0.15;
-        const sealY = topY + lastLocal * stepY + stepY * 0.95;
-        sealEl.style.width = sealSize.toFixed(1) + "px";
-        sealEl.style.height = sealSize.toFixed(1) + "px";
-        sealEl.style.fontSize = (sealSize * 0.62).toFixed(1) + "px";
-        sealEl.style.left = sealX.toFixed(1) + "px";
-        sealEl.style.top = sealY.toFixed(1) + "px";
-      }
-    }
-
-    function updatePhraseFloat(ts: number) {
-      // 批注是"写上去"的：只保留极轻微的纸面起伏（±1.2px）+ 每字固定微转
-      for (let i = 0; i < phraseSpans.length; i++) {
-        const p = phraseSpans[i];
-        if (p.el.classList.contains("gone")) continue;
-        const off = Math.sin(ts * p.speed + p.phase) * 1.2;
-        p.el.style.transform = `translateY(${off.toFixed(1)}px) rotate(${p.jRot.toFixed(2)}deg)`;
-      }
-    }
-
+    // morph = 让被擦净后剩余的旧字随黑壳一起淡出，再升起活的问题。
     let morphed = false;
     function morphPhrase() {
       if (morphed) return;
       morphed = true;
-
-      // 古批注（旧剧本）逐字烧退，随后活的问题以大字立在光里
-      phraseSpans.forEach((p, i) => {
-        setT(() => {
-          p.el.classList.add("fading");
-        }, i * 45);
-      });
-
-      // 印最后揭走：批注烧退后再隔 200ms
-      setT(() => sealEl?.classList.add("ky-seal-gone"), phraseSpans.length * 45 + 200);
-
-      const fadeOutMs = phraseSpans.length * 45 + 460;
-      setT(() => {
-        phraseSpans.forEach((p) => p.el.classList.add("gone"));
-        bigQuestionRef.current?.classList.add("ky-show");
-      }, fadeOutMs);
+      bigQuestionRef.current?.classList.add("ky-show");
     }
 
     function resetPhraseCloud() {
       morphed = false;
       bigQuestionRef.current?.classList.remove("ky-show");
-      sealEl?.classList.remove("ky-seal-gone");
-      phraseSpans.forEach((p, i) => {
-        p.el.textContent = PHRASE_OLD[i];
-        p.el.classList.remove("fading");
-        p.el.classList.remove("gone");
-      });
     }
 
     // ============================================================
@@ -817,7 +693,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
 
       if (REDUCED_MOTION) {
         corruptCanvas!.style.display = "none";
-        phraseSpans.forEach((p) => p.el.classList.add("gone"));
         bigQuestionRef.current?.classList.add("ky-show");
         actOneFinished = true;
         return;
@@ -1053,10 +928,81 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       });
     }
 
+    // 把"强加的剧本"用书法画进堕落态画布：multiply 融进羊皮纸，与黑壳同层——
+    // 擦掉黑暗时，这行别人写在你心上的字，也随之被擦掉。
+    const INK_FONT = '"Songti SC","STSong","Source Han Serif SC",serif';
+    function jitter(i: number, salt: number) {
+      const s = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+      return s - Math.floor(s); // 0..1 稳定伪随机
+    }
+    function paintInscription(c: CanvasRenderingContext2D) {
+      const fs = IMG_W * 0.043;
+      const stepY = fs * 1.34;
+      const colGap = fs * 1.6;
+      const topY = IMG_H * 0.058;
+      const rightOuterX = IMG_W * 0.9;
+      const leftOuterX = IMG_W * 0.1;
+
+      c.save();
+      c.globalCompositeOperation = "multiply";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      for (let idx = 0; idx < PHRASE_OLD.length; idx++) {
+        const side = idx < 10 ? "R" : "L";
+        const local = idx % 10;
+        const col = Math.floor(local / 5);
+        const k = local % 5;
+        const x =
+          (side === "R" ? rightOuterX - col * colGap : leftOuterX + col * colGap) +
+          (jitter(idx, 1) - 0.5) * fs * 0.14;
+        const y = topY + k * stepY + (jitter(idx, 2) - 0.5) * fs * 0.1;
+        const sc = 0.92 + jitter(idx, 3) * 0.16;
+        const rot = (jitter(idx, 4) - 0.5) * 0.06;
+        const ink = 0.62 + jitter(idx, 5) * 0.26;
+        c.save();
+        c.translate(x, y);
+        c.rotate(rot);
+        c.scale(sc, sc);
+        c.font = `600 ${fs.toFixed(1)}px ${INK_FONT}`;
+        c.fillStyle = `rgba(38,26,16,${ink.toFixed(2)})`;
+        c.fillText(PHRASE_OLD[idx], 0, 0);
+        c.restore();
+      }
+      c.restore();
+
+      // 落款朱砂印「馬」：左块次列末字下方
+      const sealSize = fs * 1.5;
+      const sealX = leftOuterX + colGap;
+      const sealY = topY + 4 * stepY + stepY;
+      c.save();
+      c.translate(sealX, sealY);
+      c.rotate(-0.05);
+      c.globalAlpha = 0.9;
+      c.fillStyle = "#8B2E2E";
+      const rr = sealSize * 0.16;
+      const h = sealSize;
+      c.beginPath();
+      c.moveTo(-h / 2 + rr, -h / 2);
+      c.arcTo(h / 2, -h / 2, h / 2, h / 2, rr);
+      c.arcTo(h / 2, h / 2, -h / 2, h / 2, rr);
+      c.arcTo(-h / 2, h / 2, -h / 2, -h / 2, rr);
+      c.arcTo(-h / 2, -h / 2, h / 2, -h / 2, rr);
+      c.closePath();
+      c.fill();
+      c.globalAlpha = 1;
+      c.fillStyle = "#F5EFE6";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.font = `700 ${(sealSize * 0.66).toFixed(1)}px ${INK_FONT}`;
+      c.fillText("馬", 0, sealSize * 0.02);
+      c.restore();
+    }
+
     function redrawCorruptFull() {
       ctx!.clearRect(0, 0, IMG_W, IMG_H);
       ctx!.globalCompositeOperation = "source-over";
       ctx!.drawImage(corruptedSrcImg!, 0, 0, IMG_W, IMG_H);
+      paintInscription(ctx!);
     }
 
     // ============================================================
@@ -1077,7 +1023,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       updateSparks(dtSec);
       updateAsh(dtSec);
       renderFx();
-      updatePhraseFloat(ts);
 
       if (ts - lastSampleTs >= PARAMS.idleSampleMs) {
         lastSampleTs = ts;
@@ -1266,7 +1211,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
       resizeTimer = setT(() => {
         resizeFxCanvas();
         buildTexture();
-        layoutPhraseCloud();
         buildEyelidPaths();
       }, 200);
     }
@@ -1286,9 +1230,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     root.style.setProperty("--ky-brush-radius", PARAMS.brushRadius + "px");
 
     resizeFxCanvas();
-    buildPhraseCloud();
     buildTexture();
-    layoutPhraseCloud();
     buildEyelidPaths();
     initHintTimer();
     initSkipTimer();
@@ -1299,6 +1241,14 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
     function onCorruptedLoaded() {
       origCtx.drawImage(corruptedSrcImg!, 0, 0, IMG_W, IMG_H);
       redrawCorruptFull();
+      // 题字用系统衬线字体，字体就绪后重绘一次，避免首帧落到 fallback 字形
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+          if (!alive || finaleFired) return;
+          redrawCorruptFull();
+          beatDirty = true;
+        });
+      }
 
       if (REDUCED_MOTION) {
         corruptCanvas!.style.filter = "";
@@ -1367,8 +1317,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           </div>
         </div>
 
-        <div id="ky-phraseLayer" ref={phraseLayerRef} className="ky-phraseLayer" />
-        <div ref={sealRef} className="ky-seal" aria-hidden="true">馬</div>
 
         <div ref={bigQuestionRef} className="ky-bigQuestion" aria-hidden="true">
           <div className="ky-bigQuestion-line">你想要</div>
@@ -1498,8 +1446,7 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           transform-style: preserve-3d;
           will-change: transform;
         }
-        .ky-textureLayer,
-        .ky-phraseLayer {
+        .ky-textureLayer {
           will-change: transform;
         }
 
@@ -1608,61 +1555,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
           transform-origin: 51% 47%;
           -webkit-mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0, 0, 0, 0.5) 80%, transparent 100%);
           mask-image: radial-gradient(ellipse 26% 31% at 51% 47%, #000 58%, rgba(0, 0, 0, 0.5) 80%, transparent 100%);
-        }
-
-        .ky-phraseLayer {
-          position: absolute;
-          inset: 0;
-          z-index: 4;
-          pointer-events: none;
-        }
-        .ky-phrase-ch {
-          position: absolute;
-          display: inline-block;
-          /* 古图谱批注体：偏褐墨色 + multiply 融进羊皮纸，字是画的一部分 */
-          color: rgba(48, 36, 24, 0.88);
-          mix-blend-mode: multiply;
-          font-weight: 500;
-          line-height: 1;
-          text-shadow: 0.5px 0.8px 1px rgba(26, 26, 26, 0.2);
-          opacity: 1;
-          filter: blur(0);
-          transition: opacity 450ms cubic-bezier(0.22, 1, 0.36, 1), filter 450ms cubic-bezier(0.22, 1, 0.36, 1);
-          will-change: transform;
-        }
-        .ky-phrase-ch.fading {
-          opacity: 0;
-          filter: blur(4px);
-        }
-        .ky-phrase-ch.gone {
-          opacity: 0;
-          filter: blur(4px);
-          pointer-events: none;
-        }
-
-        /* 落款朱砂印：白字暗红底、微斜、multiply 压进纸 */
-        .ky-seal {
-          position: absolute;
-          z-index: 4;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #f5efe6;
-          background: var(--color-accent);
-          border-radius: 14%;
-          font-weight: 700;
-          line-height: 1;
-          mix-blend-mode: multiply;
-          opacity: 0.8;
-          transform: rotate(-3deg);
-          box-shadow: inset 0 0 0 1.5px rgba(245, 239, 230, 0.35);
-          transition: opacity 400ms cubic-bezier(0.22, 1, 0.36, 1), filter 400ms cubic-bezier(0.22, 1, 0.36, 1);
-          pointer-events: none;
-          will-change: opacity;
-        }
-        .ky-seal.ky-seal-gone {
-          opacity: 0;
-          filter: blur(3px);
         }
 
         /* 终幕大字：恢复原 Hero 的居中大字排版——批注是古书上的旧剧本，
@@ -1907,9 +1799,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .ky-phrase-ch {
-            transition: opacity 1ms linear, filter 1ms linear;
-          }
           .ky-veil {
             display: none;
           }
