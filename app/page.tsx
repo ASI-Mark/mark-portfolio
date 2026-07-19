@@ -1,7 +1,6 @@
 import MouseGlow from "@/components/MouseGlow";
 import Nav from "@/components/Nav";
-import ActGate from "@/components/ActGate";
-import Creations from "@/components/Creations";
+import Hero from "@/components/Hero";
 import Experience from "@/components/Experience";
 import Beliefs from "@/components/Beliefs";
 import Thoughts from "@/components/Thoughts";
@@ -16,24 +15,23 @@ import AvatarChat from "@/components/AvatarChat";
 
 export default function Home() {
   return (
-    <ActGate avatar={<AvatarChat />}>
-      <main>
-        <MouseGlow />
-        <FloatingArrow />
-        <Nav />
-        <Experience />
-        <Creations />
-        <div id="beliefs">
-          <Beliefs />
-        </div>
-        <Thoughts />
-        <SystemCard />
-        <Timeline />
-        <ChinaMap />
-        <RecentThinking />
-        <Guestbook />
-        <Footer />
-      </main>
-    </ActGate>
+    <main>
+      <MouseGlow />
+      <FloatingArrow />
+      <AvatarChat />
+      <Nav />
+      <Hero />
+      <Experience />
+      <div id="beliefs">
+        <Beliefs />
+      </div>
+      <Thoughts />
+      <SystemCard />
+      <Timeline />
+      <ChinaMap />
+      <RecentThinking />
+      <Guestbook />
+      <Footer />
+    </main>
   );
 }

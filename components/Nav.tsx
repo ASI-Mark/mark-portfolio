@@ -1,8 +1,6 @@
-"use client";
-
 const NAV_ITEMS = [
+  { href: "#hero", label: "门面" },
   { href: "#works", label: "作品" },
-  { href: "#creations", label: "造物" },
   { href: "#mind", label: "思想" },
   { href: "#timeline", label: "底色" },
   { href: "#map", label: "足迹" },
@@ -17,18 +15,11 @@ export default function Nav() {
           justify-center, keeps the leading items reachable when the row
           overflows and scrolls */}
       <div className="max-w-prose mx-auto px-6 py-4 flex gap-8 text-sm font-sans text-muted overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new CustomEvent("kaiyan:replay"))}
-          className="hover:text-accent transition-colors tracking-widest whitespace-nowrap shrink-0 ml-auto cursor-pointer"
-        >
-          初心
-        </button>
         {NAV_ITEMS.map((item) => (
           <a
             key={item.href}
             href={item.href}
-            className="hover:text-ink transition-colors tracking-widest whitespace-nowrap shrink-0 last:mr-auto"
+            className="hover:text-ink transition-colors tracking-widest whitespace-nowrap shrink-0 first:ml-auto last:mr-auto"
           >
             {item.label}
           </a>

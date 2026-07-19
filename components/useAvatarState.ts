@@ -412,10 +412,8 @@ export function useAvatarState({
     if (!mounted) return;
 
     const zones: { id: string; zone: Exclude<Zone, null> }[] = [
-      // 旧 #hero 区块已退役（第一幕由 ActGate/HeroKaiyan 承担）；
-      // "creations" 复用 works 的动画气质
+      { id: "hero", zone: "hero" },
       { id: "works", zone: "works" },
-      { id: "creations", zone: "works" },
       { id: "beliefs", zone: "beliefs" },
       { id: "mind", zone: "mind" },
       { id: "recent", zone: "recent" },
