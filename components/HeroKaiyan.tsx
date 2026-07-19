@@ -1089,17 +1089,6 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         rebuildWings();
       }
 
-      // 翅膀扇动：被缚仅微颤(挣扎)，随治愈进度放大到自由扇动
-      if (wingsOn) {
-        const p = finaleFullBeat ? 1 : overallErasedFraction;
-        const ampDeg = (0.3 + p * 1.9) * PARAMS.wingAmp;
-        const omega = 0.006 - p * 0.0046; // 束缚快而弱 → 自由慢而阔
-        const a = ampDeg * Math.sin(ts * omega);
-        const sx = 1 + Math.max(0, a) * 0.004;
-        wingL!.style.transform = `rotate(${a.toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
-        wingR!.style.transform = `rotate(${(-a).toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
-      }
-
       if (ts >= pauseBeatUntil) {
         beatTime += dt;
         const targetBpm = PARAMS.restBpm + restBpmBonus + overallErasedFraction * 10;
@@ -1109,6 +1098,17 @@ export default function HeroKaiyan({ onDone }: HeroKaiyanProps) {
         const ampFactor = 1 + (disintegratedCount / HANDS.length) * 0.35;
         const s = 1 + (heartScaleAt(phase, ampFactor) - 1) * 0.62;
         setBeatTransform(`scale(${Math.min(s, 1.025).toFixed(4)})`);
+
+        // 翅膀与心脏同频：每个心跳周期扇动一次（bpm 升，扇动同步加快）；
+        // 幅度随治愈进度从微颤(挣扎)长到自由舒展。
+        if (wingsOn) {
+          const p = finaleFullBeat ? 1 : overallErasedFraction;
+          const ampDeg = (0.3 + p * 1.9) * PARAMS.wingAmp;
+          const a = ampDeg * Math.sin((beatTime / Tc) * Math.PI * 2);
+          const sx = 1 + Math.max(0, a) * 0.004;
+          wingL!.style.transform = `rotate(${a.toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
+          wingR!.style.transform = `rotate(${(-a).toFixed(3)}deg) scaleX(${sx.toFixed(4)})`;
+        }
 
         if (!finaleFired) {
           const pulseNorm = Math.max(0, s - 1) / (0.028 * ampFactor);
