@@ -78,9 +78,34 @@ export default function ChinaMap() {
   const [photoIndex, setPhotoIndex] = useState(0);
   const [hoveredCity, setHoveredCity] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [burstId, setBurstId] = useState(0);
+  const [drawn, setDrawn] = useState(false);
 
   const mapRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // 滚动进视口时触发"钢笔描边"入场（一次性）。reduced-motion 直接显示终态。
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    if (
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setDrawn(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setDrawn(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.25 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const selectCity = useCallback((city: City) => {
     setSelected(city);
@@ -110,11 +135,6 @@ export default function ChinaMap() {
     [typedCities]
   );
 
-  // Whenever hoveredCity changes to a new non-null city, bump burstId so particle effect restarts
-  useEffect(() => {
-    if (hoveredCity) setBurstId((b) => b + 1);
-  }, [hoveredCity]);
-
   // Preload the first photo of each city so the gallery opens instantly
   // when the user clicks a city dot.
   useEffect(() => {
@@ -128,94 +148,45 @@ export default function ChinaMap() {
 
   return (
     <>
-      <section id="map" className="py-32 px-6">
-        <div className="max-w-5xl mx-auto">
+      <section ref={sectionRef} id="map" className="py-32 px-6">
+        <div className="max-w-4xl mx-auto">
           <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-4 text-center">
             我走过的地方 / FOOTPRINTS
           </h2>
-          <p className="font-serif text-sm text-muted text-center mb-16">
+          <p className="font-serif text-sm text-muted text-center mb-12">
             20 个城市，11 个省份
           </p>
 
-          {/* 3D perspective wrapper — space-station holographic feel */}
-          <div
-            className="relative w-full"
-            style={{
-              perspective: "900px",
-              perspectiveOrigin: "50% 35%",
-            }}
-          >
-          {/* Map container */}
-          <div
-            ref={mapRef}
-            className="relative w-full rounded-2xl overflow-hidden transition-transform duration-150 ease-out"
-            style={{
-              background:
-                "radial-gradient(ellipse at 50% 30%, #1a2330 0%, #0d1117 60%, #05070b 100%)",
-              boxShadow:
-                "0 40px 80px rgba(0,0,0,0.6), 0 0 100px rgba(64,128,200,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
-              transform: "rotateX(14deg)",
-              transformStyle: "preserve-3d",
-            }}
-          >
-            {/* Vignette overlay */}
-            <div
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                background: "radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%)",
-                zIndex: 1,
-              }}
-            />
-
-            {/* Main SVG: provinces + labels + dots + effects */}
+          {/* 钢笔线稿地图：墨线省界描边入场 + 暗红城市点，铺在纸面上 */}
+          <div ref={mapRef} className="relative w-full">
             <svg
               viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
-              className="w-full h-auto relative"
-              style={{ display: "block", zIndex: 2 }}
+              className="w-full h-auto block"
             >
-              <defs>
-                {/* Glow filter for dots */}
-                <filter id="dot-glow" x="-100%" y="-100%" width="300%" height="300%">
-                  <feGaussianBlur stdDeviation="4" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-
-                {/* Stronger glow for Beijing */}
-                <filter id="beijing-glow" x="-200%" y="-200%" width="500%" height="500%">
-                  <feGaussianBlur stdDeviation="8" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-
-                {/* Ripple animation rings */}
-                <radialGradient id="ripple-grad">
-                  <stop offset="0%" stopColor="#8B2E2E" stopOpacity="0.6" />
-                  <stop offset="100%" stopColor="#8B2E2E" stopOpacity="0" />
-                </radialGradient>
-              </defs>
-
-              {/* Province outlines */}
-              {CHINA_PROVINCES.map((prov) => {
+              {/* 省界：墨线，去过的省填极淡暗红。pathLength=1 让描边入场匀速。 */}
+              {CHINA_PROVINCES.map((prov, i) => {
                 const isVisited = VISITED_PROVINCES.includes(prov.name);
                 return (
                   <path
                     key={prov.name}
                     d={prov.path}
-                    fill={isVisited ? "rgba(139, 46, 46, 0.06)" : "rgba(255, 255, 255, 0.02)"}
-                    stroke={isVisited ? "rgba(139, 46, 46, 0.12)" : "rgba(255, 255, 255, 0.06)"}
-                    strokeWidth={isVisited ? "0.8" : "0.5"}
-                    className="transition-colors duration-500"
+                    pathLength={1}
+                    fill={isVisited ? "rgba(139, 46, 46, 0.05)" : "transparent"}
+                    stroke={
+                      isVisited ? "rgba(139, 46, 46, 0.55)" : "rgba(26, 26, 26, 0.28)"
+                    }
+                    strokeWidth={isVisited ? "0.7" : "0.5"}
+                    strokeLinejoin="round"
+                    style={{
+                      strokeDasharray: 1,
+                      strokeDashoffset: drawn ? 0 : 1,
+                      transition: `stroke-dashoffset 1.4s ease ${i * 0.02}s, fill 0.8s ease ${1 + i * 0.01}s`,
+                    }}
                   />
                 );
               })}
 
-              {/* Province name labels (behind city dots) */}
+              {/* 省名：极淡墨字 */}
               {PROVINCE_LABELS.map((label) => {
                 const fullName = PROVINCE_LABEL_TO_FULL[label.name];
                 const isVisited = fullName ? VISITED_PROVINCES.includes(fullName) : false;
@@ -225,170 +196,113 @@ export default function ChinaMap() {
                     x={label.x}
                     y={label.y}
                     textAnchor="middle"
-                    fill="rgba(255, 255, 255, 1)"
-                    opacity={isVisited ? 0.25 : 0.12}
+                    fill="#1A1A1A"
+                    opacity={drawn ? (isVisited ? 0.34 : 0.16) : 0}
                     fontSize={label.name.length > 2 ? "7" : "8"}
                     fontFamily="var(--font-sans)"
                     className="pointer-events-none select-none"
-                    style={{ letterSpacing: "0.15em" }}
+                    style={{
+                      letterSpacing: "0.15em",
+                      transition: "opacity 0.8s ease 1.1s",
+                    }}
                   >
                     {label.name}
                   </text>
                 );
               })}
 
-              {/* Connection lines between nearby cities */}
-              {mounted && [
-                ["宝鸡", "西安"], ["西安", "华山"], ["西安", "汉中"],
-                ["晋城", "运城"], ["漳州", "厦门"],
-                ["惠州", "深圳"], ["惠州", "清远"], ["惠州", "河源"],
-                ["北京", "秦皇岛"],
-              ].map(([from, to], i) => {
-                const a = cityPositions.find((c) => c.name === from);
-                const b = cityPositions.find((c) => c.name === to);
-                if (!a || !b) return null;
-                return (
-                  <line
-                    key={i}
-                    x1={a.pos.x} y1={a.pos.y}
-                    x2={b.pos.x} y2={b.pos.y}
-                    stroke="rgba(139, 46, 46, 0.12)"
-                    strokeWidth="0.6"
-                    strokeDasharray="3 3"
-                  />
-                );
-              })}
-
-              {/* City dots with ripple effect */}
-              {mounted && cityPositions.map((city, idx) => {
-                const isBeijing = city.name === "北京";
-                const isHovered = hoveredCity === city.name;
-                const r = isBeijing ? 4.5 : 3;
-
-                return (
-                  <g key={city.name}>
-                    {/* Ripple rings (CSS animated) */}
-                    <circle
-                      cx={city.pos.x} cy={city.pos.y} r={r * 4}
-                      fill="none"
-                      stroke="rgba(139, 46, 46, 0.2)"
+              {/* 游线：城市间极淡墨虚线 */}
+              {mounted &&
+                [
+                  ["宝鸡", "西安"], ["西安", "华山"], ["西安", "汉中"],
+                  ["晋城", "运城"], ["漳州", "厦门"],
+                  ["惠州", "深圳"], ["惠州", "清远"], ["惠州", "河源"],
+                  ["北京", "秦皇岛"],
+                ].map(([from, to], i) => {
+                  const a = cityPositions.find((c) => c.name === from);
+                  const b = cityPositions.find((c) => c.name === to);
+                  if (!a || !b) return null;
+                  return (
+                    <line
+                      key={i}
+                      x1={a.pos.x} y1={a.pos.y}
+                      x2={b.pos.x} y2={b.pos.y}
+                      stroke="rgba(139, 46, 46, 0.18)"
                       strokeWidth="0.5"
-                      className="city-ripple"
-                      style={{ animationDelay: `${idx * 200}ms` }}
+                      strokeDasharray="2 3"
+                      opacity={drawn ? 1 : 0}
+                      style={{ transition: "opacity 0.8s ease 1.3s" }}
                     />
-                    <circle
-                      cx={city.pos.x} cy={city.pos.y} r={r * 2.5}
-                      fill="none"
-                      stroke="rgba(139, 46, 46, 0.3)"
-                      strokeWidth="0.5"
-                      className="city-ripple"
-                      style={{ animationDelay: `${idx * 200 + 500}ms` }}
-                    />
+                  );
+                })}
 
-                    {/* Outer soft glow */}
-                    <circle
-                      cx={city.pos.x} cy={city.pos.y}
-                      r={isHovered ? r * 3 : r * 2}
-                      fill="url(#ripple-grad)"
-                      opacity={isHovered ? 0.8 : 0.4}
-                      className="transition-all duration-300"
-                    />
-
-                    {/* Core dot */}
-                    <circle
-                      cx={city.pos.x} cy={city.pos.y}
-                      r={isHovered ? r * 1.5 : r}
-                      fill={isBeijing ? "#ff6b6b" : "#d4726a"}
-                      filter={isBeijing ? "url(#beijing-glow)" : "url(#dot-glow)"}
-                      className="transition-all duration-300 cursor-pointer"
-                      onClick={() => selectCity(city)}
-                      onMouseEnter={() => setHoveredCity(city.name)}
-                      onMouseLeave={() => setHoveredCity(null)}
-                      style={{ cursor: "pointer" }}
-                    />
-
-                    {/* City label */}
-                    <text
-                      x={city.pos.x}
-                      y={city.pos.y - (isBeijing ? 14 : 10)}
-                      textAnchor="middle"
-                      fill={isBeijing ? "rgba(255, 200, 200, 0.9)" : "rgba(255, 255, 255, 0.7)"}
-                      fontSize={isBeijing ? "10" : "8"}
-                      fontFamily="var(--font-sans)"
-                      className="transition-opacity duration-300 pointer-events-none select-none"
-                      opacity={isHovered || isBeijing ? 1 : 0}
-                      style={{ textShadow: "0 1px 6px rgba(0,0,0,0.9)" }}
+              {/* 城市点：暗红实心点，hover 放大并显名 */}
+              {mounted &&
+                cityPositions.map((city, idx) => {
+                  const isBeijing = city.name === "北京";
+                  const isHovered = hoveredCity === city.name;
+                  const r = isBeijing ? 3.4 : 2.4;
+                  return (
+                    <g
+                      key={city.name}
+                      opacity={drawn ? 1 : 0}
+                      style={{
+                        transition: `opacity 0.5s ease ${1.4 + idx * 0.03}s`,
+                      }}
                     >
-                      {city.name}
-                      {isBeijing && (
-                        <tspan fontSize="7" opacity="0.5" dx="4">&#8592; 在这里</tspan>
-                      )}
-                    </text>
-                  </g>
-                );
-              })}
+                      {/* hover 光晕（暗红极淡） */}
+                      <circle
+                        cx={city.pos.x} cy={city.pos.y}
+                        r={isHovered ? r * 3 : 0}
+                        fill="rgba(139, 46, 46, 0.12)"
+                        className="transition-all duration-300 pointer-events-none"
+                      />
+                      <circle
+                        cx={city.pos.x} cy={city.pos.y}
+                        r={isHovered ? r * 1.5 : r}
+                        fill="#8B2E2E"
+                        className="transition-all duration-300"
+                        onClick={() => selectCity(city)}
+                        onMouseEnter={() => setHoveredCity(city.name)}
+                        onMouseLeave={() => setHoveredCity(null)}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <text
+                        x={city.pos.x}
+                        y={city.pos.y - (isBeijing ? 8 : 6)}
+                        textAnchor="middle"
+                        fill="#1A1A1A"
+                        fontSize={isBeijing ? "8" : "7"}
+                        fontFamily="var(--font-sans)"
+                        className="transition-opacity duration-300 pointer-events-none select-none"
+                        opacity={isHovered || isBeijing ? 0.85 : 0}
+                      >
+                        {city.name}
+                        {isBeijing && (
+                          <tspan fontSize="6" opacity="0.55" dx="3">&#8592; 在这里</tspan>
+                        )}
+                      </text>
+                    </g>
+                  );
+                })}
             </svg>
 
-            {/* Particle burst overlay (HTML layer, positioned over the SVG) */}
-            {mounted && hoveredCity && (() => {
-              const city = cityPositions.find((c) => c.name === hoveredCity);
-              if (!city) return null;
-              // Convert city SVG coords to % of viewBox so overlay scales with container
-              const leftPct = ((city.pos.x - VIEW_X) / VIEW_W) * 100;
-              const topPct = ((city.pos.y - VIEW_Y) / VIEW_H) * 100;
-              return (
-                <div
-                  className="absolute inset-0 pointer-events-none"
-                  style={{ zIndex: 3 }}
-                >
-                  {Array.from({ length: 24 }).map((_, i) => {
-                    const angle = i * 15;
-                    return (
-                      <span
-                        key={`${hoveredCity}-${burstId}-${i}`}
-                        className="absolute block w-1 h-1 bg-accent rounded-full"
-                        style={{
-                          left: `${leftPct}%`,
-                          top: `${topPct}%`,
-                          // @ts-expect-error --angle is a custom CSS property
-                          "--angle": `${angle}deg`,
-                          animation: "particle-burst 0.8s ease-out forwards",
-                          animationDelay: `${i * 10}ms`,
-                          transformOrigin: "center",
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
-            {/* Bottom info bar */}
-            <div
-              className="flex items-center justify-between px-6 py-4 relative"
-              style={{ borderTop: "1px solid rgba(255,255,255,0.04)", zIndex: 2 }}
-            >
-              {/* Legend */}
+            {/* 底注 */}
+            <div className="flex items-center justify-between mt-6 px-1">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-1.5">
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: "rgba(139, 46, 46, 0.3)", border: "1px solid rgba(139, 46, 46, 0.4)" }} />
-                  <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", fontFamily: "var(--font-sans)", letterSpacing: "0.05em" }}>
-                    去过的省份
-                  </span>
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: "rgba(139, 46, 46, 0.14)", border: "1px solid rgba(139, 46, 46, 0.4)" }} />
+                  <span className="font-sans text-[10px] text-muted tracking-wide">去过的省份</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#d4726a", boxShadow: "0 0 4px rgba(139,46,46,0.5)" }} />
-                  <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", fontFamily: "var(--font-sans)", letterSpacing: "0.05em" }}>
-                    城市
-                  </span>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#8B2E2E" }} />
+                  <span className="font-sans text-[10px] text-muted tracking-wide">城市</span>
                 </div>
               </div>
-
-              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.15)", fontFamily: "var(--font-sans)", letterSpacing: "0.15em" }}>
+              <p className="font-sans text-[11px] text-muted/70 tracking-[0.15em]">
                 20 CITIES &middot; 11 PROVINCES
               </p>
             </div>
-          </div>
           </div>
         </div>
       </section>
@@ -397,7 +311,7 @@ export default function ChinaMap() {
       {selected && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center px-6"
-          style={{ background: "rgba(10, 10, 18, 0.92)", backdropFilter: "blur(12px)" }}
+          style={{ background: "rgba(24, 20, 16, 0.9)", backdropFilter: "blur(12px)" }}
           onClick={() => setSelected(null)}
         >
           <div

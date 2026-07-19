@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import SmoothScroll from "@/components/SmoothScroll";
+import PaperGrain from "@/components/PaperGrain";
 
 export const metadata: Metadata = {
   title: "马泽闰 Mark",
@@ -13,7 +15,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <SmoothScroll />
+        {children}
+        <PaperGrain />
+      </body>
     </html>
   );
 }
