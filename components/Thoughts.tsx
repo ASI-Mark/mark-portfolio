@@ -5,8 +5,8 @@ const content = staticContent as StaticContent;
 
 export default function Thoughts() {
   return (
-    <section id="mind" className="py-32 px-6">
-      <div className="max-w-prose mx-auto">
+    <section id="mind" className="min-h-screen flex flex-col justify-center py-24 px-6">
+      <div className="max-w-prose mx-auto w-full">
         <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-16 text-center">
           我怎么想事情 / MIND
         </h2>
