@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
+import { geoMercator, geoPath } from "d3-geo";
+import type { GeoProjection } from "d3-geo";
 import cities from "@/content/cities.json";
-import { CHINA_PROVINCES } from "@/lib/china-map-data";
 
 interface City {
   name: string;
@@ -14,14 +15,9 @@ interface City {
   photoCount: number;
 }
 
-// Same projection as the SVG province paths (lng 73-135, lat 18-54 → 800x680)
+// 真实高精度中国省界（DataV GeoJSON），d3-geo 投影渲染。
 const W = 800;
-const H = 680;
-function project(lat: number, lng: number) {
-  const x = ((lng - 73) / (135 - 73)) * W;
-  const y = ((54 - lat) / (54 - 18)) * H;
-  return { x, y };
-}
+const H = 620;
 
 // Which provinces Mark has visited (for highlight)
 const VISITED_PROVINCES = [
@@ -29,49 +25,25 @@ const VISITED_PROVINCES = [
   "浙江省", "贵州省", "广东省", "北京市", "河北省", "湖北省",
 ];
 
-// Province name labels with approximate screen coordinates
-const PROVINCE_LABELS: { name: string; x: number; y: number }[] = [
-  { name: "新疆", x: 170, y: 160 },
-  { name: "西藏", x: 165, y: 340 },
-  { name: "内蒙古", x: 400, y: 110 },
-  { name: "青海", x: 230, y: 270 },
-  { name: "四川", x: 300, y: 370 },
-  { name: "云南", x: 280, y: 470 },
-  { name: "广西", x: 370, y: 490 },
-  { name: "广东", x: 420, y: 490 },
-  { name: "湖南", x: 400, y: 420 },
-  { name: "湖北", x: 410, y: 370 },
-  { name: "河南", x: 430, y: 330 },
-  { name: "山东", x: 480, y: 290 },
-  { name: "河北", x: 460, y: 240 },
-  { name: "陕西", x: 370, y: 310 },
-  { name: "甘肃", x: 290, y: 240 },
-  { name: "黑龙江", x: 560, y: 80 },
-  { name: "吉林", x: 560, y: 140 },
-  { name: "辽宁", x: 530, y: 190 },
-  { name: "江苏", x: 500, y: 350 },
-  { name: "浙江", x: 510, y: 390 },
-  { name: "福建", x: 480, y: 440 },
-  { name: "江西", x: 450, y: 420 },
-  { name: "安徽", x: 470, y: 360 },
-  { name: "山西", x: 420, y: 280 },
-  { name: "贵州", x: 340, y: 440 },
-  { name: "海南", x: 390, y: 560 },
-  { name: "台湾", x: 530, y: 470 },
-];
+// 内蒙古/新疆等超长省名在小地图上不标，避免拥挤
+const LABEL_SKIP = new Set(["南海诸岛"]);
 
-// Map short province label names to full province names for visited check
-const PROVINCE_LABEL_TO_FULL: Record<string, string> = {
-  "陕西": "陕西省", "河南": "河南省", "山西": "山西省", "上海": "上海市",
-  "福建": "福建省", "浙江": "浙江省", "贵州": "贵州省", "广东": "广东省",
-  "北京": "北京市", "河北": "河北省", "湖北": "湖北省",
-};
-
-// SVG viewBox used for the map: x=80, y=-20, width=W-100, height=H+20
-const VIEW_X = 80;
-const VIEW_Y = -20;
-const VIEW_W = W - 100;
-const VIEW_H = H + 20;
+interface GeoFeature {
+  type: string;
+  properties: { name: string };
+  geometry: unknown;
+}
+interface GeoData {
+  type: string;
+  features: GeoFeature[];
+}
+interface ProvinceShape {
+  name: string;
+  d: string;
+  cx: number;
+  cy: number;
+  visited: boolean;
+}
 
 export default function ChinaMap() {
   const [selected, setSelected] = useState<City | null>(null);
@@ -79,9 +51,24 @@ export default function ChinaMap() {
   const [hoveredCity, setHoveredCity] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [drawn, setDrawn] = useState(false);
+  const [geo, setGeo] = useState<GeoData | null>(null);
 
   const mapRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+
+  // 加载真实中国省界 GeoJSON（放 public/，不进 JS 包）
+  useEffect(() => {
+    let alive = true;
+    fetch("/china-geo.json")
+      .then((r) => r.json())
+      .then((d: GeoData) => {
+        if (alive) setGeo(d);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 滚动进视口时触发"钢笔描边"入场（一次性）。reduced-motion 直接显示终态。
   useEffect(() => {
@@ -129,11 +116,44 @@ export default function ChinaMap() {
 
   const typedCities = cities as City[];
 
-  // Memoize projected city positions (in SVG viewBox coords)
-  const cityPositions = useMemo(
-    () => typedCities.map((c) => ({ ...c, pos: project(c.lat, c.lng) })),
-    [typedCities]
-  );
+  // d3-geo 投影：把整幅中国 fit 进 W×H，省界与城市点共用同一投影
+  const { projection, provinces } = useMemo(() => {
+    if (!geo) return { projection: null as GeoProjection | null, provinces: [] as ProvinceShape[] };
+    const proj = geoMercator().fitExtent(
+      [
+        [16, 16],
+        [W - 16, H - 16],
+      ],
+      geo as unknown as Parameters<GeoProjection["fitExtent"]>[1]
+    );
+    const pathGen = geoPath(proj);
+    const shapes: ProvinceShape[] = geo.features
+      .filter((f) => !LABEL_SKIP.has(f.properties.name))
+      .map((f) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const d = pathGen(f as any) || "";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const [cx, cy] = pathGen.centroid(f as any);
+        return {
+          name: f.properties.name,
+          d,
+          cx: Number.isFinite(cx) ? cx : -999,
+          cy: Number.isFinite(cy) ? cy : -999,
+          visited: VISITED_PROVINCES.includes(f.properties.name),
+        };
+      })
+      .filter((s) => s.d);
+    return { projection: proj, provinces: shapes };
+  }, [geo]);
+
+  // Memoize projected city positions (same projection as provinces)
+  const cityPositions = useMemo(() => {
+    if (!projection) return [];
+    return typedCities.map((c) => {
+      const p = projection([c.lng, c.lat]);
+      return { ...c, pos: { x: p ? p[0] : -999, y: p ? p[1] : -999 } };
+    });
+  }, [typedCities, projection]);
 
   // Preload the first photo of each city so the gallery opens instantly
   // when the user clicks a city dot.
@@ -157,56 +177,51 @@ export default function ChinaMap() {
             20 个城市，11 个省份
           </p>
 
-          {/* 钢笔线稿地图：墨线省界描边入场 + 暗红城市点，铺在纸面上 */}
+          {/* 钢笔线稿地图：真实省界墨线描边入场 + 暗红城市点，铺在纸面上 */}
           <div ref={mapRef} className="relative w-full">
             <svg
-              viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
+              viewBox={`0 0 ${W} ${H}`}
               className="w-full h-auto block"
             >
-              {/* 省界：墨线，去过的省填极淡暗红。pathLength=1 让描边入场匀速。 */}
-              {CHINA_PROVINCES.map((prov, i) => {
-                const isVisited = VISITED_PROVINCES.includes(prov.name);
-                return (
-                  <path
-                    key={prov.name}
-                    d={prov.path}
-                    pathLength={1}
-                    fill={isVisited ? "rgba(139, 46, 46, 0.05)" : "transparent"}
-                    stroke={
-                      isVisited ? "rgba(139, 46, 46, 0.55)" : "rgba(26, 26, 26, 0.28)"
-                    }
-                    strokeWidth={isVisited ? "0.7" : "0.5"}
-                    strokeLinejoin="round"
-                    style={{
-                      strokeDasharray: 1,
-                      strokeDashoffset: drawn ? 0 : 1,
-                      transition: `stroke-dashoffset 1.4s ease ${i * 0.02}s, fill 0.8s ease ${1 + i * 0.01}s`,
-                    }}
-                  />
-                );
-              })}
+              {/* 省界：真实几何墨线，去过的省填极淡暗红。pathLength=1 让描边匀速。 */}
+              {provinces.map((prov, i) => (
+                <path
+                  key={prov.name + i}
+                  d={prov.d}
+                  pathLength={1}
+                  fill={prov.visited ? "rgba(139, 46, 46, 0.06)" : "transparent"}
+                  stroke={
+                    prov.visited ? "rgba(139, 46, 46, 0.5)" : "rgba(26, 26, 26, 0.22)"
+                  }
+                  strokeWidth={prov.visited ? "0.8" : "0.5"}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  style={{
+                    strokeDasharray: 1,
+                    strokeDashoffset: drawn ? 0 : 1,
+                    transition: `stroke-dashoffset 1.6s ease ${i * 0.02}s, fill 0.9s ease ${1 + i * 0.01}s`,
+                  }}
+                />
+              ))}
 
-              {/* 省名：极淡墨字 */}
-              {PROVINCE_LABELS.map((label) => {
-                const fullName = PROVINCE_LABEL_TO_FULL[label.name];
-                const isVisited = fullName ? VISITED_PROVINCES.includes(fullName) : false;
+              {/* 省名：极淡墨字，落在真实几何质心 */}
+              {provinces.map((prov) => {
+                if (prov.cx < 0 || prov.name.length > 3) return null;
+                const short = prov.name.replace(/(省|市|自治区|特别行政区|壮族|回族|维吾尔|)$/g, "");
                 return (
                   <text
-                    key={label.name}
-                    x={label.x}
-                    y={label.y}
+                    key={"lbl-" + prov.name}
+                    x={prov.cx}
+                    y={prov.cy}
                     textAnchor="middle"
                     fill="#1A1A1A"
-                    opacity={drawn ? (isVisited ? 0.34 : 0.16) : 0}
-                    fontSize={label.name.length > 2 ? "7" : "8"}
+                    opacity={drawn ? (prov.visited ? 0.32 : 0.14) : 0}
+                    fontSize="7"
                     fontFamily="var(--font-sans)"
                     className="pointer-events-none select-none"
-                    style={{
-                      letterSpacing: "0.15em",
-                      transition: "opacity 0.8s ease 1.1s",
-                    }}
+                    style={{ letterSpacing: "0.1em", transition: "opacity 0.8s ease 1.2s" }}
                   >
-                    {label.name}
+                    {short}
                   </text>
                 );
               })}

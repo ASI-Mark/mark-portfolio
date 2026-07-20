@@ -5,7 +5,7 @@ const content = staticContent as StaticContent;
 
 export default function Beliefs() {
   return (
-    <section className="min-h-screen flex flex-col justify-center py-24 px-6">
+    <section className="py-32 px-6">
       <div className="max-w-prose mx-auto w-full">
         <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-16 text-center">
           我相信什么 / BELIEFS
