@@ -1,6 +1,7 @@
 const NAV_ITEMS = [
   { href: "#hero", label: "门面" },
   { href: "#works", label: "作品" },
+  { href: "#creations", label: "造物" },
   { href: "#mind", label: "思想" },
   { href: "#timeline", label: "底色" },
   { href: "#map", label: "足迹" },

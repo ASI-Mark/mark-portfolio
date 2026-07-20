@@ -11,7 +11,7 @@ export default function RecentThinking() {
           最近在想 / RECENT
         </h2>
         <p className="font-serif text-sm text-muted mb-16 text-center">
-          这个版本更新于 {content.updatedAt}
+          从日志和 flomo 里，最近反复在想的几件事
         </p>
 
         <ul className="space-y-12">

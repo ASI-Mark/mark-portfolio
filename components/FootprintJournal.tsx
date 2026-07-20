@@ -83,7 +83,7 @@ export default function FootprintJournal() {
         <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-4 text-center">
           我走过的地方 / FOOTPRINTS
         </h2>
-        <p className="font-serif text-sm text-muted text-center mb-14">
+        <p className="font-serif text-sm text-muted text-center mb-8">
           {total} 个城市，10 个省份
         </p>
 

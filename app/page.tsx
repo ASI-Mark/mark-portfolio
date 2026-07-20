@@ -2,6 +2,7 @@ import MouseGlow from "@/components/MouseGlow";
 import Nav from "@/components/Nav";
 import Hero from "@/components/Hero";
 import Experience from "@/components/Experience";
+import Creations from "@/components/Creations";
 import Beliefs from "@/components/Beliefs";
 import Thoughts from "@/components/Thoughts";
 import SystemCard from "@/components/SystemCard";
@@ -22,6 +23,7 @@ export default function Home() {
       <Nav />
       <Hero />
       <Experience />
+      <Creations />
       <div id="beliefs">
         <Beliefs />
       </div>
