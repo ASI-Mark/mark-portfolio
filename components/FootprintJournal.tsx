@@ -22,6 +22,7 @@ export default function FootprintJournal() {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
 
   const city = list[idx];
   const total = list.length;
@@ -37,8 +38,9 @@ export default function FootprintJournal() {
     [total]
   );
 
-  // 翻页后把这一页顶部对齐到视口，保证"点下一页显示完整一页"
+  // 翻页后：①胶片条横向滚动归零（否则停在上一站末张位置）②这一页顶部对齐视口
   useEffect(() => {
+    if (stripRef.current) stripRef.current.scrollLeft = 0;
     if (pageRef.current) {
       pageRef.current.scrollIntoView({ block: "nearest", behavior: "auto" });
     }
@@ -82,7 +84,7 @@ export default function FootprintJournal() {
           我走过的地方 / FOOTPRINTS
         </h2>
         <p className="font-serif text-sm text-muted text-center mb-14">
-          20 个城市，11 个省份
+          {total} 个城市，10 个省份
         </p>
 
         {/* 一页 = 一个城市 */}
@@ -105,6 +107,7 @@ export default function FootprintJournal() {
           {/* 照片：横向胶片条，高度有界，每页完整 */}
           {city.photoCount > 0 ? (
             <div
+              ref={stripRef}
               className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x snap-mandatory"
               style={{ scrollbarWidth: "thin" }}
             >
