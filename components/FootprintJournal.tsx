@@ -17,8 +17,16 @@ const list = cities as City[];
 
 // 翻页式旅行手记：一次一整页（一个城市），点翻页显示完整下一页。
 // 照片是主角（经历的体现），不再让抽象地图扛分量。
+// 稳定伪随机：每张照片一个固定的"手贴"微斜角，像贴进相册而非机器对齐
+function seededTilt(a: number, b: number) {
+  const s = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
+  const f = s - Math.floor(s);
+  return (f - 0.5) * 3; // ±1.5°
+}
+
 export default function FootprintJournal() {
   const [idx, setIdx] = useState(0);
+  const [dir, setDir] = useState(1); // 翻页方向：1 向后 / -1 向前，驱动转场滑向
   const [lightbox, setLightbox] = useState<number | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -27,15 +35,19 @@ export default function FootprintJournal() {
   const city = list[idx];
   const total = list.length;
 
+  // 统一的跳页入口：定方向 + 关灯箱 + 换页（翻页/键盘/城市名索引都走这里）
+  const jumpTo = useCallback((target: number) => {
+    setIdx((i) => {
+      const next = Math.max(0, Math.min(total - 1, target));
+      setDir(next >= i ? 1 : -1);
+      return next;
+    });
+    setLightbox(null);
+  }, [total]);
+
   const go = useCallback(
-    (delta: number) => {
-      setLightbox(null);
-      setIdx((i) => {
-        const next = Math.max(0, Math.min(total - 1, i + delta));
-        return next;
-      });
-    },
-    [total]
+    (delta: number) => jumpTo(idx + delta),
+    [jumpTo, idx]
   );
 
   // 翻页后：①胶片条横向滚动归零（否则停在上一站末张位置）②这一页顶部对齐视口
@@ -88,7 +100,16 @@ export default function FootprintJournal() {
         </p>
 
         {/* 一页 = 一个城市 */}
-        <div ref={pageRef} className="scroll-mt-24">
+        <div ref={pageRef} className="scroll-mt-24 relative">
+          {/* 翻页转场：整页内容按方向滑入 + 淡入（key 换即重触发） */}
+          <div
+            key={idx}
+            className="ky-fp-page"
+            style={{ ["--fp-dx" as string]: `${dir * 34}px` }}
+          >
+          {/* 朱砂旅行印：像护照盖章，微斜落在右上 */}
+          <div className="ky-fp-seal" aria-hidden="true">游</div>
+
           {/* 页眉：城市名 · 标签 · 页码 */}
           <div className="flex items-baseline justify-between mb-6 border-b border-line pb-4">
             <div className="flex items-baseline gap-3 min-w-0">
@@ -104,11 +125,11 @@ export default function FootprintJournal() {
             </span>
           </div>
 
-          {/* 照片：横向胶片条，高度有界，每页完整 */}
+          {/* 照片：横向胶片条，每张手贴微斜，高度有界，每页完整 */}
           {city.photoCount > 0 ? (
             <div
               ref={stripRef}
-              className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x snap-mandatory"
+              className="flex gap-4 overflow-x-auto pb-4 pt-1 -mx-1 px-1 snap-x snap-mandatory"
               style={{ scrollbarWidth: "thin" }}
             >
               {photos.map((n) => (
@@ -116,12 +137,13 @@ export default function FootprintJournal() {
                   key={n}
                   type="button"
                   onClick={() => setLightbox(n - 1)}
-                  className="group relative shrink-0 snap-start overflow-hidden bg-ink/[0.03] cursor-pointer"
+                  className="group relative shrink-0 snap-start overflow-hidden bg-ink/[0.03] cursor-pointer transition-transform duration-300 hover:!rotate-0 hover:z-10"
                   style={{
                     width: "min(78vw, 340px)",
                     aspectRatio: "4 / 3",
                     border: "6px solid #fff",
-                    boxShadow: "0 6px 20px rgba(26,26,26,0.10)",
+                    boxShadow: "0 6px 20px rgba(26,26,26,0.12)",
+                    transform: `rotate(${seededTilt(idx, n).toFixed(2)}deg)`,
                   }}
                   aria-label={`${city.name} 照片 ${n}`}
                 >
@@ -167,6 +189,7 @@ export default function FootprintJournal() {
               下一站 →
             </button>
           </div>
+          </div>
         </div>
 
         {/* 城市索引：点名字直接跳到那一页 */}
@@ -175,7 +198,7 @@ export default function FootprintJournal() {
             <button
               key={c.name}
               type="button"
-              onClick={() => setIdx(i)}
+              onClick={() => jumpTo(i)}
               className={`font-sans text-xs tracking-wide transition-colors cursor-pointer ${
                 i === idx ? "text-accent" : "text-muted/50 hover:text-muted"
               }`}
@@ -185,6 +208,43 @@ export default function FootprintJournal() {
           ))}
         </div>
       </div>
+
+      <style>{`
+        .ky-fp-page {
+          animation: ky-fp-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes ky-fp-in {
+          from { opacity: 0; transform: translateX(var(--fp-dx, 34px)); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        /* 朱砂旅行印：护照盖章感，微斜落右上，压在页眉上方 */
+        .ky-fp-seal {
+          position: absolute;
+          top: -30px;
+          right: -2px;
+          z-index: 5;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #f5efe6;
+          background: var(--color-accent);
+          border-radius: 15%;
+          font-family: "Songti SC", "STSong", serif;
+          font-weight: 700;
+          font-size: 22px;
+          line-height: 1;
+          mix-blend-mode: multiply;
+          opacity: 0.82;
+          transform: rotate(-8deg);
+          box-shadow: inset 0 0 0 1.5px rgba(245, 239, 230, 0.35);
+          pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ky-fp-page { animation: none; }
+        }
+      `}</style>
 
       {/* 灯箱：点照片看大图 */}
       {lightbox !== null && city.photoCount > 0 && (
