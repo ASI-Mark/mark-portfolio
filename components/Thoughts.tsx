@@ -1,5 +1,6 @@
 import staticContent from "@/content/static.json";
 import type { StaticContent } from "@/lib/types";
+import AccentText from "@/components/AccentText";
 
 const content = staticContent as StaticContent;
 
@@ -17,7 +18,7 @@ export default function Thoughts() {
                 {t.title}
               </h3>
               <p className="font-serif text-base text-ink leading-loose">
-                {t.body}
+                <AccentText text={t.body} />
               </p>
             </article>
           ))}

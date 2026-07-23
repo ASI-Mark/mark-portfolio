@@ -1,5 +1,6 @@
 import staticContent from "@/content/static.json";
 import type { StaticContent } from "@/lib/types";
+import AccentText from "@/components/AccentText";
 
 const content = staticContent as StaticContent;
 
@@ -16,7 +17,7 @@ export default function Beliefs() {
               key={i}
               className="font-serif text-2xl md:text-3xl text-ink text-center leading-relaxed"
             >
-              {b.text}
+              <AccentText text={b.text} />
             </blockquote>
           ))}
         </div>
