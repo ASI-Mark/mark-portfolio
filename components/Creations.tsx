@@ -9,6 +9,7 @@ interface CreationItem {
   status: "run" | "paused" | "retired";
   name: string;
   tagline: string;
+  metric: string;
   detail: string;
 }
 
@@ -78,6 +79,10 @@ export default function Creations() {
                   </div>
                   <p className="font-serif text-sm text-muted leading-relaxed mt-1.5 pl-[4.5rem] sm:hidden">
                     {item.tagline}
+                  </p>
+                  {/* 量化数字：真实数据当证据，常显 */}
+                  <p className="font-sans text-xs text-accent/85 tracking-wide mt-2 pl-[4.5rem] tabular-nums">
+                    {item.metric}
                   </p>
                 </button>
 
