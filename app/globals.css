@@ -105,3 +105,9 @@ html, body {
   100% { opacity: 0; transform: scale(1.8); }
 }
 
+/* 碰一碰「我」中心呼吸圈 */
+@keyframes kmGlow {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.12); }
+}
+

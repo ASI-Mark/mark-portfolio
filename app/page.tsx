@@ -5,6 +5,7 @@ import Experience from "@/components/Experience";
 import Creations from "@/components/Creations";
 import Beliefs from "@/components/Beliefs";
 import Thoughts from "@/components/Thoughts";
+import TouchToKnowMe from "@/components/TouchToKnowMe";
 import SystemCard from "@/components/SystemCard";
 import Timeline from "@/components/Timeline";
 import FootprintJournal from "@/components/FootprintJournal";
@@ -28,6 +29,7 @@ export default function Home() {
         <Beliefs />
       </div>
       <Thoughts />
+      <TouchToKnowMe />
       <SystemCard />
       <Timeline />
       <FootprintJournal />
