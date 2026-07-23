@@ -156,7 +156,7 @@ export default function InkParticleMorph() {
   };
 
   return (
-    <section className="py-32 px-6">
+    <section id="versions" className="py-32 px-6 scroll-mt-20">
       <div className="max-w-prose mx-auto">
         <h2 className="font-sans text-xs text-muted tracking-widest uppercase mb-4 text-center">
           不同版本的我 / VERSIONS OF ME
